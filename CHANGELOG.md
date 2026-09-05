@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/jdziat/vastai-mcp/compare/v0.2.0...v0.3.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** vast_search_offers no longer accepts geolocation, min_inet_down_mbps, static_ip, min_direct_ports, or min_cuda; use raw_query.
+
+### Features
+
+* **tools:** trim vast_search_offers to core filters plus raw_query ([e805682](https://github.com/jdziat/vastai-mcp/commit/e805682c5846967a037dec6138dec4ac858f0a00))
+
 ## [0.2.0](https://github.com/jdziat/vastai-mcp/compare/v0.1.0...v0.2.0) (2026-09-05)
 
 
