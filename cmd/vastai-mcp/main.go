@@ -157,12 +157,12 @@ func run() int {
 }
 
 func runHTTP(ctx context.Context, server *mcp.Server, addr, token, cert, key string) int {
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
-		CrossOriginProtection: http.NewCrossOriginProtection(),
-	})
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	// Auth first, then cross-origin (DNS-rebinding / browser) protection.
+	protected := serve.BearerAuth(token, http.NewCrossOriginProtection().Handler(handler))
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           serve.BearerAuth(token, handler),
+		Handler:           protected,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		// No WriteTimeout: it would sever long-lived SSE streams.

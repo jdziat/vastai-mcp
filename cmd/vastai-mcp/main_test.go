@@ -71,13 +71,16 @@ func waitListening(t *testing.T, r *bufio.Reader) {
 	t.Fatal("timeout waiting for listen")
 }
 
-func initReq(t *testing.T, url, token string) int {
+func initReq(t *testing.T, url, token string, hdr ...string) int {
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
 	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for i := 0; i+1 < len(hdr); i += 2 {
+		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -120,6 +123,9 @@ func TestInsecureRemoteRequiresToken(t *testing.T) {
 	}
 	if code := initReq(t, url, "s3cret"); code != 200 {
 		t.Errorf("right token = %d, want 200", code)
+	}
+	if code := initReq(t, url, "s3cret", "Origin", "https://evil.example.com"); code != 403 {
+		t.Errorf("cross-origin with valid token = %d, want 403", code)
 	}
 	if b, err := os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/cmdline"); err == nil && strings.Contains(string(b), "s3cret") {
 		t.Error("token visible in argv")
