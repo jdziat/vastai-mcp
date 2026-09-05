@@ -40,26 +40,40 @@ func run() int {
 	log.SetOutput(os.Stderr) // stdout is the MCP transport in stdio mode
 	log.SetFlags(0)
 
-	if len(os.Args) > 1 && os.Args[1] == "auth" {
-		return runAuth(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
-	}
-
 	// Capture proxy/CA state before anything untrusted (.env) can change it.
 	baseURL := envOr("VASTAI_BASE_URL", vast.DefaultBaseURL)
-	transport := vast.NewPinnedTransport(baseURL)
+	transport, err := vast.NewPinnedTransport(baseURL)
+	if err != nil {
+		log.Printf("vastai-mcp: %v", err)
+		return 2
+	}
+	if err := checkBaseURL(baseURL); err != nil {
+		log.Printf("vastai-mcp: %v", err)
+		return 2
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "auth" {
+		// Same key resolution as the server, so `auth status` reports what
+		// the server will use.
+		if _, err := vast.LoadDotEnv(); err != nil {
+			log.Printf("vastai-mcp: %v", err)
+			return 2
+		}
+		return runAuth(os.Args[2:], os.Stdin, os.Stdout, os.Stderr, baseURL, transport)
+	}
 
 	httpAddr := flag.String("http", "", "serve Streamable HTTP on host:port instead of stdio (use 127.0.0.1:PORT; non-loopback binds require a token and TLS)")
-	tokenFile := flag.String("http-token-file", "", "file containing the bearer token for -http (or set VASTAI_MCP_TOKEN)")
+	tokenFile := flag.String("http-token-file", "", "file containing the bearer token for -http (env VASTAI_MCP_TOKEN)")
 	tlsCert := flag.String("tls-cert", "", "TLS certificate for -http")
 	tlsKey := flag.String("tls-key", "", "TLS key for -http")
 	insecureHTTP := flag.Bool("insecure-http", false, "allow a non-loopback -http bind without TLS (bearer token is sent in plaintext)")
-	flag.StringVar(&baseURL, "base-url", baseURL, "Vast.ai API base URL (https required)")
+	flag.StringVar(&baseURL, "base-url", baseURL, "Vast.ai API base URL, https required (env VASTAI_BASE_URL)")
 	envErrs := []error{}
-	maxDPH := flag.Float64("max-dph", envFloat("VASTAI_MAX_DPH", &envErrs), "reject vast_create_instance when GPU + storage cost exceeds this $/hr (0 = unlimited)")
-	maxInst := flag.Int("max-instances", envInt("VASTAI_MAX_INSTANCES", &envErrs), "reject vast_create_instance when this many instances exist (0 = unlimited)")
-	readOnly := flag.Bool("read-only", envBool("VASTAI_READ_ONLY", false, &envErrs), "register only read-only tools")
-	confirm := flag.Bool("confirm", envBool("VASTAI_CONFIRM", true, &envErrs), "require human confirmation for create/destroy/rm")
-	auditPath := flag.String("audit-log", os.Getenv("VASTAI_AUDIT_LOG"), "append audit records of mutating calls to this file (mode 0600); stderr always receives them")
+	maxDPH := flag.Float64("max-dph", envFloat("VASTAI_MAX_DPH", &envErrs), "reject vast_create_instance and vast_start_instance above this $/hr including storage; 0 = unlimited (env VASTAI_MAX_DPH)")
+	maxInst := flag.Int("max-instances", envInt("VASTAI_MAX_INSTANCES", &envErrs), "reject vast_create_instance when this many instances exist; 0 = unlimited (env VASTAI_MAX_INSTANCES)")
+	readOnly := flag.Bool("read-only", envBool("VASTAI_READ_ONLY", false, &envErrs), "register only read-only tools (env VASTAI_READ_ONLY)")
+	confirm := flag.Bool("confirm", envBool("VASTAI_CONFIRM", true, &envErrs), "require human confirmation for create/destroy/rm/ssh-key tools (env VASTAI_CONFIRM)")
+	auditPath := flag.String("audit-log", os.Getenv("VASTAI_AUDIT_LOG"), "append JSONL audit records of mutating calls to this file (mode 0600); stderr always receives them (env VASTAI_AUDIT_LOG)")
 	exposeSecrets := flag.Bool("expose-instance-secrets", false, "return jupyter_token and similar fields to the model")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -75,8 +89,8 @@ func run() int {
 		fmt.Println("vastai-mcp", buildVersion())
 		return 0
 	}
-	if !strings.HasPrefix(baseURL, "https://") && os.Getenv("VASTAI_ALLOW_INSECURE_BASE_URL") != "1" {
-		log.Printf("vastai-mcp: -base-url must be https:// (got %q)", baseURL)
+	if err := checkBaseURL(baseURL); err != nil { // -base-url may have changed it
+		log.Printf("vastai-mcp: %v", err)
 		return 2
 	}
 
@@ -126,7 +140,7 @@ func run() int {
 		ConfirmArgAllowed:     *httpAddr == "" || policy.Loopback,
 		ExposeInstanceSecrets: *exposeSecrets,
 	}
-	var auditW io.Writer = os.Stderr
+	cfg.Audit = os.Stderr
 	if *auditPath != "" {
 		f, err := tools.OpenAuditLog(*auditPath)
 		if err != nil {
@@ -134,9 +148,8 @@ func run() int {
 			return 2
 		}
 		defer func() { _ = f.Close() }()
-		auditW = io.MultiWriter(os.Stderr, f)
+		cfg.AuditFile = f
 	}
-	cfg.Audit = auditW
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "vastai-mcp", Version: buildVersion()}, &mcp.ServerOptions{
 		Instructions: "Tools for the Vast.ai GPU cloud marketplace. Search offers with vast_search_offers, then rent with vast_create_instance. " +
@@ -201,6 +214,15 @@ func runHTTP(ctx context.Context, server *mcp.Server, addr, token, cert, key str
 	}
 	<-done
 	return 0
+}
+
+// checkBaseURL enforces https for the API base URL. The escape hatch exists
+// for tests against a local stub and is documented in SECURITY.md.
+func checkBaseURL(u string) error {
+	if strings.HasPrefix(u, "https://") || os.Getenv("VASTAI_ALLOW_INSECURE_BASE_URL") == "1" {
+		return nil
+	}
+	return fmt.Errorf("base URL must be https:// (got %q); set VASTAI_ALLOW_INSECURE_BASE_URL=1 only for local test stubs", u)
 }
 
 func buildVersion() string {

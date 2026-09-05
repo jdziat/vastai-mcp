@@ -3,6 +3,8 @@ package vast
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,15 +19,22 @@ import (
 // effect on this client.
 //
 // The tunings mirror http.DefaultTransport so nothing is lost by not using it.
-func NewPinnedTransport(base string) *http.Transport {
+//
+// It fails closed: if the system pool cannot be loaded there is nothing to pin
+// and the caller must not fall back to lazily resolved roots.
+func NewPinnedTransport(base string) (*http.Transport, error) {
 	// Warm the proxy cache.
 	if u, err := url.Parse(base); err == nil {
 		_, _ = http.ProxyFromEnvironment(&http.Request{URL: u})
 	}
-	var tlsCfg *tls.Config
-	if pool, err := x509.SystemCertPool(); err == nil && pool != nil {
-		tlsCfg = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, fmt.Errorf("load system CA pool: %w", err)
 	}
+	if pool == nil {
+		return nil, errors.New("system CA pool is empty")
+	}
+	tlsCfg := &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -38,5 +47,5 @@ func NewPinnedTransport(base string) *http.Transport {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       tlsCfg,
-	}
+	}, nil
 }

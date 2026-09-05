@@ -4,8 +4,12 @@
   "method": "PUT",
   "recorded_at": "2026-09-05T15:07:55.796332+00:00",
   "note": "q={\"ask_contract_id\":{\"eq\":45669396},\"type\":\"on-demand\"} (id:{eq} returns nothing; ask_contract_id is the working key)",
-  "scrubbed": [],
-  "units": "gpu_ram/cpu_ram in MB, disk_space in GB, dph_total per offer (all GPUs), storage_cost $/GB/month"
+  "scrubbed": [
+   "host_id",
+   "machine_id",
+   "public_ipaddr"
+  ],
+  "units": "gpu_ram/cpu_ram in MB, disk_space in GB, dph_total $/hr for the whole offer INCLUDING storage_total_cost = storage_cost * allocated_storage / 720 (verified 2026-09-05 by varying allocated_storage); dph_base is GPU only"
  },
  "offers": [
   {
@@ -53,7 +57,7 @@
    "gpu_max_power": 500.0,
    "gpu_max_temp": 33.0,
    "has_avx": 1,
-   "host_id": 406325,
+   "host_id": 0,
    "hosting_type": 1,
    "hostname": null,
    "inet_down": 621.8,
@@ -62,14 +66,14 @@
    "inet_up_cost": 0.005208333333333333,
    "is_bid": false,
    "logo": "/static/logos/vastai_small2.png",
-   "machine_id": 144923,
+   "machine_id": 0,
    "min_bid": 0.907,
    "mobo_name": "B850 EAGLE ICE",
    "num_gpus": 1,
    "os_version": "24.04",
    "pci_gen": 5.0,
    "pcie_bw": 47.7,
-   "public_ipaddr": "180.189.55.43",
+   "public_ipaddr": "192.0.2.1",
    "reliability": 0.9958626,
    "reliability_mult": 0.9602433,
    "rentable": true,

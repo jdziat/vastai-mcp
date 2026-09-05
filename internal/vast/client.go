@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -64,8 +65,13 @@ func LoadAPIKey() (string, KeySource, error) {
 			return v, KeySourceEnv, nil
 		}
 	}
-	if v, err := KeyringGet(); err == nil {
+	v, err := KeyringGet()
+	if err == nil {
 		return v, KeySourceKeyring, nil
+	}
+	if !errors.Is(err, ErrKeyringNotFound) {
+		// Locked keyring or no Secret Service: say so, then fall through.
+		fmt.Fprintf(os.Stderr, "vastai-mcp: OS keyring unavailable (%v); trying key files\n", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -93,7 +99,13 @@ func New(apiKey, baseURL string, transport http.RoundTripper) *Client {
 		baseURL = DefaultBaseURL
 	}
 	if transport == nil {
-		transport = NewPinnedTransport(baseURL)
+		t, err := NewPinnedTransport(baseURL)
+		if err != nil {
+			// A client without pinned roots must not exist; callers pass a
+			// transport explicitly when they need to handle this.
+			panic("vastai-mcp: " + err.Error())
+		}
+		transport = t
 	}
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
@@ -225,8 +237,49 @@ func backoff(attempt int, retryAfter time.Duration) time.Duration {
 	return base + jitter
 }
 
-// FetchURL GETs an absolute URL (used for result_url log/command outputs).
+// resultHostSuffixes are the only hosts a result_url may point at: the API
+// host itself and the S3 bucket Vast.ai publishes logs/command output to.
+var resultHostSuffixes = []string{"vast.ai", "amazonaws.com"}
+
+// ValidateResultURL rejects result_url values that are not https to a known
+// host, so a hostile upstream response cannot turn the server into an SSRF
+// proxy against link-local or internal addresses.
+func (c *Client) ValidateResultURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("result_url: %w", err)
+	}
+	host := strings.ToLower(u.Hostname())
+	bu, _ := url.Parse(c.BaseURL)
+	// Only an explicitly insecure (http) base URL, which main gates behind
+	// VASTAI_ALLOW_INSECURE_BASE_URL, may hand out http result URLs, and
+	// then only on its own host:port (local test stubs).
+	if bu != nil && bu.Scheme == "http" && u.Scheme == "http" && u.Host == bu.Host {
+		return nil
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("result_url must be https, got %q", u.Scheme)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return fmt.Errorf("result_url must not be an IP literal (%s)", host)
+	}
+	allowed := resultHostSuffixes
+	if bu != nil && bu.Hostname() != "" {
+		allowed = append(allowed, strings.ToLower(bu.Hostname()))
+	}
+	for _, suf := range allowed {
+		if host == suf || strings.HasSuffix(host, "."+suf) {
+			return nil
+		}
+	}
+	return fmt.Errorf("result_url host %q is not an allowed Vast.ai result host", host)
+}
+
+// FetchURL GETs a validated result_url (log/command outputs).
 func (c *Client) FetchURL(ctx context.Context, u string) ([]byte, int, error) {
+	if err := c.ValidateResultURL(u); err != nil {
+		return nil, 0, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, 0, err
@@ -318,11 +371,17 @@ func (c *Client) SearchOffers(ctx context.Context, q map[string]any, d SearchDef
 // LookupOffer resolves a single offer by id with no default filters, so
 // unverified, bid, and rented offers resolve. The API does not filter on
 // "id"; ask_contract_id (which equals the offer id) is the working key.
+// diskGB is passed as allocated_storage so the returned dph_total already
+// includes storage for that disk (dph_total = dph_base + storage_total_cost,
+// where storage_total_cost = storage_cost * GB / 720; observed 2026-09-05).
 // Returns nil, nil when the offer no longer exists.
-func (c *Client) LookupOffer(ctx context.Context, id int64, bid bool) (map[string]any, error) {
+func (c *Client) LookupOffer(ctx context.Context, id int64, bid bool, diskGB float64) (map[string]any, error) {
 	q := map[string]any{"ask_contract_id": map[string]any{"eq": id}, "type": "on-demand"}
 	if bid {
 		q["type"] = "bid"
+	}
+	if diskGB > 0 {
+		q["allocated_storage"] = diskGB
 	}
 	offers, err := c.SearchOffers(ctx, q, NoDefaults, "", 1)
 	if err != nil {

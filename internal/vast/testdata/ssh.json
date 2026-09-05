@@ -5,13 +5,14 @@
   "recorded_at": "2026-09-05T15:14:43.137226+00:00",
   "note": "top-level JSON array",
   "scrubbed": [
+   "id",
    "public_key",
    "user_id"
   ]
  },
  "data": [
   {
-   "id": 694971,
+   "id": 1000,
    "user_id": 0,
    "default": null,
    "public_key": "ssh-ed25519 <scrubbed>",
@@ -20,7 +21,7 @@
    "deleted_at": null
   },
   {
-   "id": 574791,
+   "id": 1001,
    "user_id": 0,
    "default": null,
    "public_key": "ssh-ed25519 <scrubbed>",

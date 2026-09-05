@@ -182,3 +182,27 @@ func TestMalformedGuardrailEnvRefusesStart(t *testing.T) {
 		t.Errorf("valid env refused: %s", out)
 	}
 }
+
+func TestAuthStatusRefusesHTTPBaseURL(t *testing.T) {
+	cmd := exec.Command(binPath, "auth", "status")
+	cmd.Env = []string{"VASTAI_API_KEY=test", "HOME=" + t.TempDir(), "VASTAI_BASE_URL=http://127.0.0.1:9"}
+	cmd.Dir = t.TempDir()
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "https://") {
+		t.Fatalf("auth over http must be refused before any request: err=%v out=%s", err, out)
+	}
+}
+
+func TestAuthStatusHonoursDotEnv(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("VASTAI_API_KEY=from-dotenv\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binPath, "auth", "status")
+	cmd.Env = []string{"HOME=" + t.TempDir(), "VASTAI_BASE_URL=http://127.0.0.1:9", "VASTAI_ALLOW_INSECURE_BASE_URL=1"}
+	cmd.Dir = dir
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "key source: environment") {
+		t.Fatalf("auth status must resolve .env like the server does: %s", out)
+	}
+}

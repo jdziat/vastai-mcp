@@ -43,11 +43,11 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 	if cfg.Audit == nil {
 		cfg.Audit = os.Stderr
 	}
-	d := &deps{c: c, cfg: cfg, audit: &auditor{w: cfg.Audit}, signer: newStateSigner()}
+	d := &deps{c: c, cfg: cfg, audit: &auditor{stderr: cfg.Audit, file: cfg.AuditFile}, signer: newStateSigner()}
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_search_offers",
-		Description: "Search rentable GPU offers, cheapest first by default. Pass the returned offer `id` to vast_create_instance. dph_total is $/hr for the whole offer, excluding storage.",
+		Description: "Search rentable GPU offers, cheapest first by default. Pass the returned offer `id` to vast_create_instance. dph_total is $/hr for the whole offer including storage for disk_gb; dph_base is GPU only.",
 		Annotations: annRead,
 	}, d.searchOffers)
 	mcp.AddTool(s, &mcp.Tool{
@@ -122,13 +122,13 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 	}, d.execute)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_create_ssh_key",
-		Description: "Register an SSH public key on the account so new instances accept it.",
-		Annotations: annMutating,
+		Description: "Register an SSH public key on the account so new instances accept it. Grants root access to future instances, so it requires user approval.",
+		Annotations: annDestructive,
 	}, d.createSSHKey)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_attach_ssh_key",
-		Description: "Add an SSH public key to an existing running instance.",
-		Annotations: annMutating,
+		Description: "Add an SSH public key to an existing instance. Grants root access to that instance, so it requires user approval.",
+		Annotations: annDestructive,
 	}, d.attachSSHKey)
 }
 
@@ -388,8 +388,9 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		disk = defaultDiskGB
 	}
 
-	// Resolve the offer with no default filters so unverified/bid/rented ids resolve.
-	offer, err := d.c.LookupOffer(ctx, a.OfferID, a.BidPrice > 0)
+	// Resolve the offer with no default filters so unverified/bid/rented ids
+	// resolve, priced for the disk we intend to allocate.
+	offer, err := d.c.LookupOffer(ctx, a.OfferID, a.BidPrice > 0, disk)
 	if err != nil {
 		return d.errResult(fmt.Errorf("lookup offer %d: %w", a.OfferID, err))
 	}
@@ -397,20 +398,21 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "offer not found"})
 		return d.errResult(fmt.Errorf("offer %d not found (it may have been rented or withdrawn); search again", a.OfferID))
 	}
-	hourly, priceKnown := num(offer["dph_total"])
+	// dph_total from the lookup already includes storage for `disk`.
+	total, priceKnown := num(offer["dph_total"])
+	gpuHourly, _ := num(offer["dph_base"])
+	storageHourly, _ := num(offer["storage_total_cost"])
 	if a.BidPrice > 0 {
-		hourly, priceKnown = a.BidPrice, true
 		if mb, ok := num(offer["min_bid"]); ok && a.BidPrice < mb {
 			return d.errResult(fmt.Errorf("bid_price %.4f is below the offer's min_bid %.4f", a.BidPrice, mb))
 		}
+		gpuHourly = a.BidPrice
+		total, priceKnown = a.BidPrice+storageHourly, true
 	}
-	storageCost, storageKnown := num(offer["storage_cost"])
-	storageHourly := storageCost * disk / 730 // $/GB/month → $/hr
-	total := hourly + storageHourly
 	if d.cfg.MaxDPH > 0 {
-		if !priceKnown || !storageKnown {
+		if !priceKnown {
 			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "price unknown"})
-			return d.errResult(fmt.Errorf("offer %d has no usable dph_total/storage_cost; refusing to create while -max-dph is set", a.OfferID))
+			return d.errResult(fmt.Errorf("offer %d has no usable dph_total; refusing to create while -max-dph is set", a.OfferID))
 		}
 		if total > d.cfg.MaxDPH {
 			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_dph", "total_usd_hr": total, "cap": d.cfg.MaxDPH})
@@ -429,12 +431,12 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 	}
 
 	preview := map[string]any{
-		"offer":                  pick(offer, []string{"id", "gpu_name", "num_gpus", "gpu_ram", "disk_space", "dph_total", "storage_cost", "verification", "geolocation", "reliability2"}),
+		"offer":                  pick(offer, []string{"id", "gpu_name", "num_gpus", "gpu_ram", "disk_space", "dph_base", "dph_total", "storage_cost", "verification", "geolocation", "reliability2"}),
 		"image":                  a.Image,
 		"template_hash_id":       a.TemplateHashID,
 		"disk_gb":                disk,
 		"label":                  a.Label,
-		"estimated_gpu_usd_hr":   round4(hourly),
+		"estimated_gpu_usd_hr":   round4(gpuHourly),
 		"estimated_disk_usd_hr":  round4(storageHourly),
 		"estimated_total_usd_hr": round4(total),
 		"estimated_usd_per_day":  round4(total * 24),
@@ -480,8 +482,7 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 	// Post-create TOCTOU check: the offer may have repriced between lookup and PUT.
 	if d.cfg.MaxDPH > 0 && res.NewContract > 0 {
 		if inst, err := d.c.ShowInstance(ctx, res.NewContract); err == nil && inst != nil {
-			actual, _ := num(inst["dph_total"])
-			actual += storageHourly
+			actual, _ := num(inst["dph_total"]) // instance dph_total includes its storage
 			out["actual_usd_hr"] = round4(actual)
 			if actual > d.cfg.MaxDPH {
 				d.audit.log(tool, req.Params.Arguments, "PRICE_BREACH", map[string]any{"instance_id": res.NewContract, "actual_usd_hr": actual, "cap": d.cfg.MaxDPH})
@@ -540,7 +541,27 @@ func (d *deps) simpleMutation(ctx context.Context, req *mcp.CallToolRequest, too
 }
 
 func (d *deps) startInstance(ctx context.Context, req *mcp.CallToolRequest, a IDArgs) (*mcp.CallToolResult, any, error) {
-	return d.simpleMutation(ctx, req, "vast_start_instance", func() (any, error) { return d.c.SetInstanceState(ctx, a.ID, "running") })
+	const tool = "vast_start_instance"
+	if d.cfg.MaxDPH > 0 {
+		// Starting resumes billing, so the spend cap applies here too.
+		inst, err := d.c.ShowInstance(ctx, a.ID)
+		if err != nil {
+			return d.errResult(err)
+		}
+		if inst == nil {
+			return d.errResult(fmt.Errorf("instance %d not found", a.ID))
+		}
+		total, ok := num(inst["dph_total"]) // includes storage
+		if !ok {
+			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "price unknown"})
+			return d.errResult(fmt.Errorf("instance %d has no usable dph_total; refusing to start while -max-dph is set", a.ID))
+		}
+		if total > d.cfg.MaxDPH {
+			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_dph", "total_usd_hr": total, "cap": d.cfg.MaxDPH})
+			return d.errResult(fmt.Errorf("instance %d bills $%.4f/hr when running, which exceeds the -max-dph cap of $%.4f/hr", a.ID, total, d.cfg.MaxDPH))
+		}
+	}
+	return d.simpleMutation(ctx, req, tool, func() (any, error) { return d.c.SetInstanceState(ctx, a.ID, "running") })
 }
 
 func (d *deps) stopInstance(ctx context.Context, req *mcp.CallToolRequest, a IDArgs) (*mcp.CallToolResult, any, error) {
@@ -644,6 +665,7 @@ func (d *deps) listSSHKeys(ctx context.Context, _ *mcp.CallToolRequest, _ struct
 
 type SSHKeyArgs struct {
 	PublicKey string `json:"public_key" jsonschema:"SSH public key text (e.g. contents of ~/.ssh/id_ed25519.pub)"`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"Set true only after the user has approved the preview returned by a previous call"`
 }
 
 func validatePublicKey(s string) (string, error) {
@@ -658,10 +680,33 @@ func validatePublicKey(s string) (string, error) {
 	return s, nil
 }
 
+// confirmKeyGrant gates SSH-key tools: a key is root access, and the key
+// text may have arrived via untrusted container output.
+func (d *deps) confirmKeyGrant(req *mcp.CallToolRequest, confirmArg bool, tool, action, key string) (*mcp.CallToolResult, any, error, bool) {
+	preview := "public key: " + keyFingerprint(key)
+	ask, err := d.confirm(req, confirmArg, tool, action, preview, 0)
+	if ask != nil {
+		return ask, nil, nil, true
+	}
+	if err != nil {
+		d.audit.log(tool, req.Params.Arguments, "not_confirmed", map[string]any{"reason": err.Error()})
+		if errors.Is(err, ErrNotConfirmed) {
+			r, o, e := d.declined(map[string]any{"status": "not_added", "reason": err.Error(), "public_key": keyFingerprint(key)}, err)
+			return r, o, e, true
+		}
+		r, o, e := d.errResult(err)
+		return r, o, e, true
+	}
+	return nil, nil, nil, false
+}
+
 func (d *deps) createSSHKey(ctx context.Context, req *mcp.CallToolRequest, a SSHKeyArgs) (*mcp.CallToolResult, any, error) {
 	key, err := validatePublicKey(a.PublicKey)
 	if err != nil {
 		return d.errResult(err)
+	}
+	if r, o, e, done := d.confirmKeyGrant(req, a.Confirm, "vast_create_ssh_key", "registering an SSH key on the account (root access to future instances)", key); done {
+		return r, o, e
 	}
 	return d.simpleMutation(ctx, req, "vast_create_ssh_key", func() (any, error) { return d.c.CreateSSHKey(ctx, key) })
 }
@@ -669,12 +714,16 @@ func (d *deps) createSSHKey(ctx context.Context, req *mcp.CallToolRequest, a SSH
 type AttachSSHKeyArgs struct {
 	ID        int64  `json:"id" jsonschema:"Instance id"`
 	PublicKey string `json:"public_key" jsonschema:"SSH public key text"`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"Set true only after the user has approved the preview returned by a previous call"`
 }
 
 func (d *deps) attachSSHKey(ctx context.Context, req *mcp.CallToolRequest, a AttachSSHKeyArgs) (*mcp.CallToolResult, any, error) {
 	key, err := validatePublicKey(a.PublicKey)
 	if err != nil {
 		return d.errResult(err)
+	}
+	if r, o, e, done := d.confirmKeyGrant(req, a.Confirm, "vast_attach_ssh_key", fmt.Sprintf("attaching an SSH key to instance %d (root access)", a.ID), key); done {
+		return r, o, e
 	}
 	return d.simpleMutation(ctx, req, "vast_attach_ssh_key", func() (any, error) { return d.c.AttachSSHKey(ctx, a.ID, key) })
 }

@@ -2,6 +2,7 @@ package vast
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -129,12 +130,15 @@ func TestLookupOfferUsesAskContractIDNoDefaults(t *testing.T) {
 		got = body["q"].(map[string]any)
 		w.Write([]byte(`{"offers": [{"id": 42, "dph_total": 0.5}]}`))
 	})
-	o, err := c.LookupOffer(context.Background(), 42, true)
+	o, err := c.LookupOffer(context.Background(), 42, true, 25)
 	if err != nil || o["id"] != float64(42) {
 		t.Fatalf("got %v %v", o, err)
 	}
 	if _, ok := got["verified"]; ok {
 		t.Error("lookup must not apply verified default")
+	}
+	if got["allocated_storage"] != float64(25) {
+		t.Errorf("allocated_storage must be passed so dph_total prices the intended disk: %v", got)
 	}
 	if _, ok := got["ask_contract_id"]; !ok {
 		t.Errorf("lookup must filter on ask_contract_id: %v", got)
@@ -143,7 +147,7 @@ func TestLookupOfferUsesAskContractIDNoDefaults(t *testing.T) {
 		t.Errorf("bid lookup type = %v", got["type"])
 	}
 	c2, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"offers": []}`)) })
-	if o, err := c2.LookupOffer(context.Background(), 1, false); err != nil || o != nil {
+	if o, err := c2.LookupOffer(context.Background(), 1, false, 0); err != nil || o != nil {
 		t.Fatalf("missing offer should be nil,nil: %v %v", o, err)
 	}
 }
@@ -252,12 +256,15 @@ func TestLoadDotEnvMissingFile(t *testing.T) {
 func TestPinnedTransportIgnoresLateProxy(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "")
 	os.Unsetenv("HTTPS_PROXY")
-	tr := NewPinnedTransport("https://example.invalid")
+	tr, err := NewPinnedTransport("https://example.invalid")
+	if err != nil {
+		t.Skip("no system pool on this platform")
+	}
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9")
 	req, _ := http.NewRequest("GET", "https://example.invalid/x", nil)
-	u, err := tr.Proxy(req)
-	if err != nil {
-		t.Fatal(err)
+	u, perr := tr.Proxy(req)
+	if perr != nil {
+		t.Fatal(perr)
 	}
 	if u != nil {
 		t.Fatalf("proxy set after pinning must be ignored, got %v", u)
@@ -337,7 +344,7 @@ func TestFixtureSearchAsksUnitsAndShape(t *testing.T) {
 
 func TestFixtureLookupOfferResolves(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { w.Write(loadFixture(t, "lookup_offer.json")) })
-	o, err := c.LookupOffer(context.Background(), 45669396, false)
+	o, err := c.LookupOffer(context.Background(), 45669396, false, 10)
 	if err != nil || o == nil || o["id"] != float64(45669396) {
 		t.Fatalf("got %v %v", o, err)
 	}
@@ -376,5 +383,45 @@ func TestFixtureSSHKeysIsArray(t *testing.T) {
 	json.Unmarshal(loadFixture(t, "ssh.json"), &f)
 	if len(f.Data) == 0 || f.Data[0]["public_key"] == nil {
 		t.Fatal("ssh fixture shape")
+	}
+}
+
+func TestValidateResultURL(t *testing.T) {
+	c := New("k", "https://console.vast.ai/api/v0", http.DefaultTransport)
+	ok := []string{"https://s3.amazonaws.com/public.vast.ai/x", "https://console.vast.ai/api/v0/r", "https://logs.vast.ai/a"}
+	bad := []string{"http://s3.amazonaws.com/x", "https://169.254.169.254/latest/meta-data/", "https://evil.example.com/x", "https://amazonaws.com.evil.example/x", "https://[::1]/x", "ftp://vast.ai/x"}
+	for _, u := range ok {
+		if err := c.ValidateResultURL(u); err != nil {
+			t.Errorf("%s rejected: %v", u, err)
+		}
+	}
+	for _, u := range bad {
+		if err := c.ValidateResultURL(u); err == nil {
+			t.Errorf("%s accepted", u)
+		}
+	}
+	if _, _, err := c.FetchURL(context.Background(), "https://169.254.169.254/"); err == nil {
+		t.Error("FetchURL must refuse link-local")
+	}
+	// An http base (test stubs only) may serve http results on its own host, nothing else.
+	local := New("k", "http://127.0.0.1:4321", http.DefaultTransport)
+	if err := local.ValidateResultURL("http://127.0.0.1:4321/result"); err != nil {
+		t.Errorf("same-host http result on http base rejected: %v", err)
+	}
+	if err := local.ValidateResultURL("http://127.0.0.1:9/other"); err == nil {
+		t.Error("different host:port http result accepted")
+	}
+	if err := local.ValidateResultURL("http://169.254.169.254/"); err == nil {
+		t.Error("link-local accepted on http base")
+	}
+}
+
+func TestPinnedTransportFailsClosedComment(t *testing.T) {
+	tr, err := NewPinnedTransport("https://example.invalid")
+	if err != nil {
+		t.Skip("no system pool on this platform")
+	}
+	if tr.TLSClientConfig == nil || tr.TLSClientConfig.RootCAs == nil || tr.TLSClientConfig.MinVersion < tls.VersionTLS12 {
+		t.Fatal("pinned transport must carry RootCAs and TLS >= 1.2")
 	}
 }

@@ -11,7 +11,9 @@ guardrails.
 Release binaries with checksums are attached to each
 [GitHub release](https://github.com/jdziat/vastai-mcp/releases). The
 `checksums.txt` file is signed keylessly with [Sigstore cosign](https://docs.sigstore.dev)
-by the release workflow's GitHub identity, so you can verify a download:
+by the release workflow's GitHub identity. Signing `checksums.txt` covers
+every archive listed in it. Download `checksums.txt`, `checksums.txt.sig`,
+`checksums.txt.pem`, and your archive, then:
 
 ```sh
 cosign verify-blob checksums.txt \
@@ -79,12 +81,18 @@ These are enforced inside the server and do not rely on the model.
 
 | Flag | Env | Default | Effect |
 | --- | --- | --- | --- |
-| `-confirm` | `VASTAI_CONFIRM` | `true` | `vast_create_instance`, `vast_destroy_instance`, and `vast_execute rm …` return a cost/impact preview and ask the user through the client's confirmation prompt (MCP elicitation). The answer is bound to the previewed arguments and price with a signed token; a decline is final. Clients without elicitation may pass `confirm: true` on stdio or loopback only. On such clients the check is advisory, since the model sets the flag; use `-max-dph`, `-max-instances`, or `-read-only` for enforcement there. |
-| `-max-dph` | `VASTAI_MAX_DPH` | `0` (off) | Reject creates whose GPU plus storage cost exceeds this $/hr. Checked against the live offer before the request and against the real instance price after. A malformed value refuses to start. |
+| `-confirm` | `VASTAI_CONFIRM` | `true` | `vast_create_instance`, `vast_destroy_instance`, `vast_create_ssh_key`, `vast_attach_ssh_key`, and `vast_execute rm …` return a cost/impact preview and ask the user through the client's confirmation prompt (MCP elicitation). The answer is bound to the previewed arguments and price with a signed token; a decline is final. Clients without elicitation may pass `confirm: true` on stdio or loopback only. On such clients the check is advisory, since the model sets the flag; use `-max-dph`, `-max-instances`, or `-read-only` for enforcement there. |
+| `-max-dph` | `VASTAI_MAX_DPH` | `0` (off) | Reject `vast_create_instance` and `vast_start_instance` when the total hourly cost, GPU plus storage, exceeds this $/hr. Checked against the live offer priced for the requested disk before the request, and against the real instance price after. A malformed value refuses to start. |
 | `-max-instances` | `VASTAI_MAX_INSTANCES` | `0` (off) | Reject creates when this many instances already exist. Checked before and after approval; two approvals interleaving within the same second can still overshoot by one, since Vast.ai has no server-side reservation. |
 | `-read-only` | `VASTAI_READ_ONLY` | `false` | Register only the read-only tools. |
-| `-audit-log FILE` | `VASTAI_AUDIT_LOG` | | Append one JSON record per mutating call (mode 0600). stderr always receives them. Credentials are never logged. |
+| `-audit-log FILE` | `VASTAI_AUDIT_LOG` | | Append one JSON record per mutating call as JSONL (mode 0600). stderr always receives the same records prefixed with `AUDIT `. Credentials, `image_login`, `onstart`, and `env` values are never logged. |
 | `-expose-instance-secrets` | | `false` | Return `jupyter_token` and similar fields to the model. |
+| `-base-url URL` | `VASTAI_BASE_URL` | Vast.ai API | API base URL; must be https. `VASTAI_ALLOW_INSECURE_BASE_URL=1` overrides that for local test stubs only (see SECURITY.md). |
+| `-version` | | | Print the version and exit. |
+
+Exit codes: `0` clean exit (including client disconnect on stdio), `1` runtime
+failure, `2` configuration refused (missing key, bad flag or env value,
+unsafe `-http` bind).
 
 Logs and command output are wrapped in `<untrusted>` delimiters and stripped
 of ANSI escapes so the model can tell container data from instructions.
@@ -111,7 +119,7 @@ elicitation.
 
 | Tool | Description |
 | --- | --- |
-| `vast_search_offers` | Search rentable GPU offers by GPU, VRAM, price, reliability, region, etc. |
+| `vast_search_offers` | Search rentable GPU offers by GPU, VRAM, disk, price, reliability; anything else via `raw_query` |
 | `vast_search_templates` | Search recommended public templates (PyTorch, ComfyUI, vLLM, ...) |
 | `vast_list_instances` | List your instances with status, cost and SSH details |
 | `vast_show_instance` | Details for one instance |
@@ -123,7 +131,7 @@ elicitation.
 | `vast_instance_logs` | Fetch container logs (untrusted output) |
 | `vast_execute` | Run `ls`, `du`, or `rm` inside an instance (`rm` confirmed) |
 | `vast_show_user` | Account info and credit balance |
-| `vast_list_ssh_keys` / `vast_create_ssh_key` / `vast_attach_ssh_key` | Manage SSH keys |
+| `vast_list_ssh_keys` / `vast_create_ssh_key` / `vast_attach_ssh_key` | Manage SSH keys (adding a key grants root access, so it is confirmed) |
 
 `vast_search_offers` exposes the common filters as parameters; anything else
 (`geolocation`, `inet_down`, `static_ip`, `direct_port_count`,
@@ -146,7 +154,7 @@ and response shapes against them.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org):
 `feat:` bumps the minor version, `fix:` the patch, and a `!` or
-`BREAKING CHANGE:` footer bumps the major (minor while below 1.0). Run
+`BREAKING CHANGE:` footer bumps the major. Run
 `make hooks` once to enable the local `commit-msg` check; CI enforces it with
 commitlint.
 
@@ -154,6 +162,15 @@ Releases are automatic: release-please opens a "chore(main): release x.y.z"
 PR from the commits on `main`, and merging it tags the version, updates
 `CHANGELOG.md`, and publishes cross-platform binaries with checksums via
 goreleaser.
+
+## Stability
+
+From 1.0, semantic versioning covers: tool names and their argument keys,
+flag and environment variable names, exit codes, the audit record field
+names, and the `auth` subcommands. It does not cover tool description text,
+the shape of result bodies (which pass through Vast.ai fields), or the exact
+wording of error messages. Changing the cosign signing identity counts as a
+breaking change.
 
 ## Layout
 

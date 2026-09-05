@@ -23,7 +23,7 @@ lint:
 vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
-check: vet test vulncheck
+check: vet lint test vulncheck
 
 clean:
 	rm -rf bin dist
