@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (v0.1.0)
+Entries below this line are maintained by release-please.
+
+## Pre-release notes
 
 ### Added
 - MCP server for Vast.ai with 16 tools: offer/template search, instance

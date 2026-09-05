@@ -118,6 +118,19 @@ make lint         # golangci-lint + gosec
 provenance header; tests pin units (RAM in MB, disk in GB, price per offer)
 and response shapes against them.
 
+## Contributing and releases
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org):
+`feat:` bumps the minor version, `fix:` the patch, and a `!` or
+`BREAKING CHANGE:` footer bumps the major (minor while below 1.0). Run
+`make hooks` once to enable the local `commit-msg` check; CI enforces it with
+commitlint.
+
+Releases are automatic: release-please opens a "chore(main): release x.y.z"
+PR from the commits on `main`, and merging it tags the version, updates
+`CHANGELOG.md`, and publishes cross-platform binaries with checksums via
+goreleaser.
+
 ## Layout
 
 ```

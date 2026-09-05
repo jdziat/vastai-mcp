@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 export CGO_ENABLED=0
 
-.PHONY: build install test vet lint vulncheck check clean
+.PHONY: build install test vet lint vulncheck check clean hooks
 
 build:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/vastai-mcp ./cmd/vastai-mcp
@@ -27,3 +27,6 @@ check: vet test vulncheck
 
 clean:
 	rm -rf bin dist
+
+hooks:
+	git config core.hooksPath .githooks

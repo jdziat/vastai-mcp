@@ -1,0 +1,11 @@
+#!/bin/sh
+# Conventional Commits check (mirrors .commitlintrc.yml). Enable with: make hooks
+msg=$(sed -n '1p' "$1")
+case "$msg" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+if ! printf '%s' "$msg" | grep -Eq '^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([a-z0-9._/-]+\))?!?: [^ ].{0,90}$'; then
+  echo "commit-msg: header must be Conventional Commits, e.g. 'feat(tools): add vast_foo' or 'fix: ...'" >&2
+  echo "  got: $msg" >&2
+  exit 1
+fi
