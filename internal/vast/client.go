@@ -45,17 +45,31 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("vast.ai API error: HTTP %d: %s", e.Status, e.Body)
 }
 
-// LoadAPIKey resolves the API key from VASTAI_API_KEY, VAST_API_KEY,
-// ~/.config/vastai/vast_api_key, or ~/.vast_api_key (in that order).
-func LoadAPIKey() (string, error) {
+// KeySource names where the API key came from.
+type KeySource string
+
+const (
+	KeySourceEnv     KeySource = "environment"
+	KeySourceKeyring KeySource = "os keyring"
+	KeySourceFile    KeySource = "config file"
+)
+
+// LoadAPIKey resolves the API key in this order: VASTAI_API_KEY or
+// VAST_API_KEY (explicit override, also how .env is surfaced), the OS
+// keyring (see `vastai-mcp auth set`), then ~/.config/vastai/vast_api_key
+// or ~/.vast_api_key (written by the official CLI).
+func LoadAPIKey() (string, KeySource, error) {
 	for _, env := range []string{"VASTAI_API_KEY", "VAST_API_KEY"} {
 		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
-			return v, nil
+			return v, KeySourceEnv, nil
 		}
+	}
+	if v, err := KeyringGet(); err == nil {
+		return v, KeySourceKeyring, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, p := range []string{
 		filepath.Join(home, ".config", "vastai", "vast_api_key"),
@@ -66,10 +80,10 @@ func LoadAPIKey() (string, error) {
 			continue
 		}
 		if v := strings.TrimSpace(string(b)); v != "" {
-			return v, nil
+			return v, KeySourceFile, nil
 		}
 	}
-	return "", errors.New("no Vast.ai API key found: set VASTAI_API_KEY or write ~/.config/vastai/vast_api_key")
+	return "", "", errors.New("no Vast.ai API key found: run `vastai-mcp auth set`, or set VASTAI_API_KEY")
 }
 
 // New creates a client. baseURL may be empty to use the default. transport

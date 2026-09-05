@@ -31,21 +31,33 @@ make build   # -> bin/vastai-mcp
 
 ## Authentication
 
-The API key is resolved in this order:
+Store the key in your OS keyring once (macOS Keychain, Windows Credential
+Manager, or the Linux Secret Service such as GNOME Keyring or KWallet):
 
-1. `VASTAI_API_KEY` or `VAST_API_KEY` environment variable
-2. A `.env` file in the working directory. Only those two keys are read from
-   it; every other line is ignored and reported on stderr.
+```sh
+vastai-mcp auth set        # prompts with hidden input; also accepts a piped key
+vastai-mcp auth status     # shows the source and checks the key against the API
+vastai-mcp auth delete
+```
+
+Resolution order when the server starts:
+
+1. `VASTAI_API_KEY` or `VAST_API_KEY` environment variable, or a `.env` file in
+   the working directory (only those two keys are read from it)
+2. The OS keyring entry written by `vastai-mcp auth set`
 3. `~/.config/vastai/vast_api_key` or `~/.vast_api_key` (written by the official CLI)
 
-Get a key from https://cloud.vast.ai/account/.
+Get a key from https://cloud.vast.ai/account/. On headless Linux without a
+Secret Service the keyring is unavailable and the server falls through to the
+other sources.
 
 ## Client configuration
 
 Claude Code:
 
 ```sh
-claude mcp add vastai -e VASTAI_API_KEY=... -e VASTAI_MAX_DPH=1.00 -- vastai-mcp
+vastai-mcp auth set
+claude mcp add vastai -e VASTAI_MAX_DPH=1.00 -- vastai-mcp
 ```
 
 Generic JSON (Claude Desktop, Cursor, etc.):
@@ -55,8 +67,7 @@ Generic JSON (Claude Desktop, Cursor, etc.):
   "mcpServers": {
     "vastai": {
       "command": "vastai-mcp",
-      "args": ["-max-dph", "1.00", "-max-instances", "2"],
-      "env": { "VASTAI_API_KEY": "..." }
+      "args": ["-max-dph", "1.00", "-max-instances", "2"]
     }
   }
 }
