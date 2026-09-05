@@ -52,8 +52,6 @@ type auditor struct {
 	w  io.Writer
 }
 
-var redactedArgKeys = map[string]bool{"image_login": true, "public_key": true}
-
 // redactArgs returns a copy of args safe to log: image_login dropped,
 // env values replaced by their keys, public keys fingerprinted.
 func redactArgs(args any) any {

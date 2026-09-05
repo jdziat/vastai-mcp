@@ -74,6 +74,9 @@ vastai-mcp -http 127.0.0.1:8080          # loopback: no token needed
 VASTAI_MCP_TOKEN=... vastai-mcp -http 0.0.0.0:8443 -tls-cert cert.pem -tls-key key.pem
 ```
 
+Loopback binds take no token, so any local process on that machine can drive
+the server; on shared hosts, set `VASTAI_MCP_TOKEN` anyway.
+
 A non-loopback bind refuses to start without a bearer token (from
 `VASTAI_MCP_TOKEN` or `-http-token-file`; never a flag) **and** TLS.
 `-insecure-http` allows plaintext, which sends the token and every tool
