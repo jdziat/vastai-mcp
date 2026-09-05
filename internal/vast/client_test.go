@@ -425,3 +425,21 @@ func TestPinnedTransportFailsClosedComment(t *testing.T) {
 		t.Fatal("pinned transport must carry RootCAs and TLS >= 1.2")
 	}
 }
+
+func TestFixtureStoppedInstancePriceIncludesStorage(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { w.Write(loadFixture(t, "instance_stopped.json")) })
+	inst, err := c.ShowInstance(context.Background(), 1)
+	if err != nil || inst == nil {
+		t.Fatal(err)
+	}
+	base, total, st := inst["dph_base"].(float64), inst["dph_total"].(float64), inst["storage_total_cost"].(float64)
+	if inst["cur_state"] != "stopped" {
+		t.Fatal("fixture must be a stopped instance")
+	}
+	if d := total - (base + st); d > 1e-9 || d < -1e-9 {
+		t.Fatalf("stopped instance dph_total %v != dph_base %v + storage %v", total, base, st)
+	}
+	if total < base {
+		t.Fatal("stopped instance must still report the full running rate")
+	}
+}

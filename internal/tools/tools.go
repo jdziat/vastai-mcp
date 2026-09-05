@@ -273,7 +273,7 @@ func (d *deps) searchOffers(ctx context.Context, _ *mcp.CallToolRequest, a Searc
 
 var offerFields = []string{
 	"id", "gpu_name", "num_gpus", "gpu_ram", "gpu_total_ram", "cpu_name", "cpu_cores_effective", "cpu_ram",
-	"disk_space", "disk_bw", "dph_total", "dph_base", "storage_cost", "inet_up", "inet_down", "inet_up_cost", "inet_down_cost",
+	"disk_space", "disk_bw", "dph_total", "dph_base", "storage_cost", "storage_total_cost", "inet_up", "inet_down", "inet_up_cost", "inet_down_cost",
 	"reliability2", "dlperf", "dlperf_per_dphtotal", "cuda_max_good", "driver_version", "geolocation",
 	"static_ip", "direct_port_count", "verification", "rentable", "rented", "machine_id", "host_id", "min_bid", "is_bid", "duration",
 }
@@ -401,18 +401,19 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 	// dph_total from the lookup already includes storage for `disk`.
 	total, priceKnown := num(offer["dph_total"])
 	gpuHourly, _ := num(offer["dph_base"])
-	storageHourly, _ := num(offer["storage_total_cost"])
+	storageHourly, storageKnown := num(offer["storage_total_cost"])
 	if a.BidPrice > 0 {
 		if mb, ok := num(offer["min_bid"]); ok && a.BidPrice < mb {
 			return d.errResult(fmt.Errorf("bid_price %.4f is below the offer's min_bid %.4f", a.BidPrice, mb))
 		}
 		gpuHourly = a.BidPrice
-		total, priceKnown = a.BidPrice+storageHourly, true
+		// A bid replaces the GPU rate; storage must still be known to price it.
+		total, priceKnown = a.BidPrice+storageHourly, storageKnown
 	}
 	if d.cfg.MaxDPH > 0 {
 		if !priceKnown {
 			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "price unknown"})
-			return d.errResult(fmt.Errorf("offer %d has no usable dph_total; refusing to create while -max-dph is set", a.OfferID))
+			return d.errResult(fmt.Errorf("offer %d has no usable dph_total/storage_total_cost; refusing to create while -max-dph is set", a.OfferID))
 		}
 		if total > d.cfg.MaxDPH {
 			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_dph", "total_usd_hr": total, "cap": d.cfg.MaxDPH})

@@ -55,10 +55,12 @@ func (s *stub) handler(srvURL *string) http.HandlerFunc {
 				if q, ok := body["q"].(map[string]any); ok {
 					gb, hasGB := q["allocated_storage"].(float64)
 					base, hasBase := o["dph_base"].(float64)
-					if hasGB && hasBase {
-						sc, _ := o["storage_cost"].(float64)
+					sc, hasSC := o["storage_cost"].(float64)
+					if hasGB && hasBase && hasSC {
 						o["storage_total_cost"] = sc * gb / 720
 						o["dph_total"] = base + sc*gb/720
+					} else if hasGB && hasBase {
+						o["dph_total"] = base
 					}
 				}
 				offers = append(offers, o)
@@ -789,5 +791,16 @@ func TestAuditFileIsRawJSONLAndRedactsOnstart(t *testing.T) {
 	}
 	if !strings.HasPrefix(e.audit.String(), "AUDIT {") {
 		t.Errorf("stderr sink should carry the AUDIT prefix: %q", e.audit.String()[:20])
+	}
+}
+
+func TestBidCreateRejectsUnknownStorage(t *testing.T) {
+	e := newEnv(t, Config{MaxDPH: 1.00, Confirm: false}, nil)
+	e.stub.mu.Lock()
+	delete(e.stub.offer, "storage_cost") // stub then omits storage_total_cost
+	e.stub.mu.Unlock()
+	out, isErr := e.call(t, "vast_create_instance", map[string]any{"offer_id": 42, "image": "x", "bid_price": 0.98})
+	if !isErr || !strings.Contains(out, "storage_total_cost") || hasMutation(e.stub.mutations(), "PUT /asks/") {
+		t.Fatalf("bid with unknown storage must be refused under -max-dph: %q", out)
 	}
 }

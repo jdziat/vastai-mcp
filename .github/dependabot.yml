@@ -6,6 +6,10 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(ci)"
+    ignore:
+      # Major bumps of the actions in the signing job are taken by hand.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: gomod
     directory: /
     schedule:

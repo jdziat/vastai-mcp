@@ -4,6 +4,7 @@ package vast
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,19 +93,16 @@ func LoadAPIKey() (string, KeySource, error) {
 	return "", "", errors.New("no Vast.ai API key found: run `vastai-mcp auth set`, or set VASTAI_API_KEY")
 }
 
-// New creates a client. baseURL may be empty to use the default. transport
-// may be nil, in which case a pinned transport is built now.
+// New creates a client. baseURL may be empty to use the default. Production
+// callers pass the transport from NewPinnedTransport; a nil transport uses
+// the stdlib default (unpinned, TLS 1.2+) and is meant for tests.
 func New(apiKey, baseURL string, transport http.RoundTripper) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	if transport == nil {
-		t, err := NewPinnedTransport(baseURL)
-		if err != nil {
-			// A client without pinned roots must not exist; callers pass a
-			// transport explicitly when they need to handle this.
-			panic("vastai-mcp: " + err.Error())
-		}
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		transport = t
 	}
 	return &Client{
@@ -263,7 +261,7 @@ func (c *Client) ValidateResultURL(raw string) error {
 	if ip := net.ParseIP(host); ip != nil {
 		return fmt.Errorf("result_url must not be an IP literal (%s)", host)
 	}
-	allowed := resultHostSuffixes
+	allowed := append([]string(nil), resultHostSuffixes...)
 	if bu != nil && bu.Hostname() != "" {
 		allowed = append(allowed, strings.ToLower(bu.Hostname()))
 	}
@@ -272,7 +270,7 @@ func (c *Client) ValidateResultURL(raw string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("result_url host %q is not an allowed Vast.ai result host", host)
+	return fmt.Errorf("result_url host %q is not in the allowed result hosts %v; if Vast.ai moved log storage, this list needs updating", host, allowed)
 }
 
 // FetchURL GETs a validated result_url (log/command outputs).
