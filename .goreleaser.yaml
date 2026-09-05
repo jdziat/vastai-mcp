@@ -2,9 +2,12 @@ version: 2
 builds:
   - main: ./cmd/vastai-mcp
     binary: vastai-mcp
-    env: [CGO_ENABLED=0]
-    flags: [-trimpath]
-    ldflags: [-s -w -X main.version={{.Version}}]
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - "-s -w -X main.version={{.Version}}"
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 archives:
@@ -20,8 +23,8 @@ signs:
   # Keyless Sigstore signing via the workflow's GitHub OIDC identity.
   # Signing checksums.txt covers every archive listed in it.
   - cmd: cosign
-    certificate: '${artifact}.pem'
-    signature: '${artifact}.sig'
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
     args:
       - sign-blob
       - --yes
