@@ -1,6 +1,6 @@
 module github.com/jdziat/vastai-mcp
 
-go 1.25.0
+go 1.25.5
 
 require github.com/modelcontextprotocol/go-sdk v1.7.0
 
