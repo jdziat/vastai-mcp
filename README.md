@@ -16,7 +16,7 @@ by the release workflow's GitHub identity, so you can verify a download:
 ```sh
 cosign verify-blob checksums.txt \
   --certificate checksums.txt.pem --signature checksums.txt.sig \
-  --certificate-identity-regexp 'https://github.com/jdziat/vastai-mcp/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity https://github.com/jdziat/vastai-mcp/.github/workflows/release.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum -c checksums.txt --ignore-missing
 ```
