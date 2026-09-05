@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -177,12 +178,17 @@ func runHTTP(ctx context.Context, server *mcp.Server, addr, token, cert, key str
 			log.Printf("vastai-mcp: shutdown: %v", err)
 		}
 	}()
-	log.Printf("vastai-mcp listening on %s (tls=%v auth=%v)", addr, cert != "", token != "")
-	var err error
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("vastai-mcp: %v", err)
+		return 1
+	}
+	// Logged only once the socket is bound, so "listening" means reachable.
+	log.Printf("vastai-mcp listening on %s (tls=%v auth=%v)", ln.Addr(), cert != "", token != "")
 	if cert != "" {
-		err = srv.ListenAndServeTLS(cert, key)
+		err = srv.ServeTLS(ln, cert, key)
 	} else {
-		err = srv.ListenAndServe()
+		err = srv.Serve(ln)
 	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("vastai-mcp: %v", err)
