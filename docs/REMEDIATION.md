@@ -142,8 +142,6 @@ Config (flag > env): `-max-dph`/`VASTAI_MAX_DPH` (0 = unlimited),
 - Makefile: `CGO_ENABLED=0`, `-trimpath`, `lint`, `vulncheck` targets.
 - Initial commit on `main`; README install instructions valid only once pushed
   (documents `go install` and release binaries).
-- **Rotate the Vast.ai key in `./.env` before publishing** (it has lived in a
-  build/test environment).
 
 ## Out of scope for v0.1.0
 Per-tool rate limiting; OAuth for HTTP mode; cumulative $/hr cap across running
