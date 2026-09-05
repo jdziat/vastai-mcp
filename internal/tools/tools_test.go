@@ -76,6 +76,11 @@ type env struct {
 // elicit may be nil (client without elicitation capability).
 func newEnv(t *testing.T, cfg Config, elicit func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error)) *env {
 	t.Helper()
+	return newEnvWithServerMiddleware(t, cfg, elicit)
+}
+
+func newEnvWithServerMiddleware(t *testing.T, cfg Config, elicit func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error), mws ...mcp.Middleware) *env {
+	t.Helper()
 	st := &stub{
 		offer: map[string]any{"id": float64(42), "ask_contract_id": float64(42), "gpu_name": "RTX 4090", "num_gpus": float64(1),
 			"dph_total": 0.40, "storage_cost": 0.15, "min_bid": 0.20, "verification": "verified"},
@@ -92,6 +97,7 @@ func newEnv(t *testing.T, cfg Config, elicit func(context.Context, *mcp.ElicitRe
 	audit := &bytes.Buffer{}
 	cfg.Audit = audit
 	server := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, nil)
+	server.AddReceivingMiddleware(mws...)
 	Register(server, c, cfg)
 
 	ct, stt := mcp.NewInMemoryTransports()
@@ -493,30 +499,96 @@ func TestStateBoundToArgsAndPrice(t *testing.T) {
 		t.Fatal("hash must be canonical and ignore confirm")
 	}
 	h2, _ := hashArgs(json.RawMessage(`{"offer_id":43,"image":"x"}`))
-	tok, err := s.sign(confirmState{Tool: "vast_create_instance", ArgHash: h1, Price: 0.40})
-	if err != nil {
-		t.Fatal(err)
+	pv := hashPreview("preview")
+	sign := func() string {
+		tok, err := s.sign(confirmState{Tool: "vast_create_instance", ArgHash: h1, Price: 0.40, PreviewHash: pv})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
 	}
-	if err := s.verify(tok, "vast_create_instance", h1, 0.402); err != nil {
+	tok := sign()
+	if err := s.verify(tok, "vast_create_instance", h1, 0.402, pv); err != nil {
 		t.Errorf("same request within tolerance: %v", err)
 	}
-	if err := s.verify(tok, "vast_create_instance", h2, 0.40); err == nil {
+	if err := s.verify(tok, "vast_create_instance", h1, 0.40, pv); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Errorf("replayed token accepted: %v", err)
+	}
+	if err := s.verify(sign(), "vast_create_instance", h2, 0.40, pv); err == nil {
 		t.Error("different args accepted")
 	}
-	if err := s.verify(tok, "vast_destroy_instance", h1, 0.40); err == nil {
+	if err := s.verify(sign(), "vast_destroy_instance", h1, 0.40, pv); err == nil {
 		t.Error("different tool accepted")
 	}
-	if err := s.verify(tok, "vast_create_instance", h1, 4.0); err == nil || !strings.Contains(err.Error(), "price changed") {
+	if err := s.verify(sign(), "vast_create_instance", h1, 0.40, hashPreview("other")); err == nil || !strings.Contains(err.Error(), "target changed") {
+		t.Errorf("changed preview accepted: %v", err)
+	}
+	if err := s.verify(sign(), "vast_create_instance", h1, 4.0, pv); err == nil || !strings.Contains(err.Error(), "price changed") {
 		t.Errorf("repriced offer accepted: %v", err)
 	}
+	if !priceMatches(20.0, 20.04) || priceMatches(20.0, 20.10) {
+		t.Error("tolerance ceiling not applied")
+	}
 	other := newStateSigner()
-	if err := other.verify(tok, "vast_create_instance", h1, 0.40); err == nil {
+	if err := other.verify(sign(), "vast_create_instance", h1, 0.40, pv); err == nil {
 		t.Error("token from another key accepted")
 	}
+	tok = sign()
 	s.now = func() time.Time { return time.Now().Add(confirmTTL + time.Minute) }
-	if err := s.verify(tok, "vast_create_instance", h1, 0.40); err == nil || !strings.Contains(err.Error(), "expired") {
+	if err := s.verify(tok, "vast_create_instance", h1, 0.40, pv); err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Errorf("expired token accepted: %v", err)
 	}
+}
+
+func TestApprovalCannotBeReplayed(t *testing.T) {
+	// Capture the confirmed retry (RequestState + InputResponses) on the server
+	// side, then replay it byte-for-byte from the client.
+	var captured *mcp.CallToolParamsRaw
+	var mu sync.Mutex
+	capture := func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if r, ok := req.(*mcp.CallToolRequest); ok && len(r.Params.InputResponses) > 0 {
+				mu.Lock()
+				captured = r.Params
+				mu.Unlock()
+			}
+			return next(ctx, method, req)
+		}
+	}
+	e := newEnvWithServerMiddleware(t, Config{Confirm: true, ConfirmArgAllowed: false}, accept, capture)
+	first, err := e.cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "vast_create_instance", Arguments: map[string]any{"offer_id": 42, "image": "x"}})
+	if err != nil || first.IsError {
+		t.Fatalf("first confirmed create failed: %+v", first)
+	}
+	mu.Lock()
+	c := captured
+	mu.Unlock()
+	if c == nil || c.RequestState == "" {
+		t.Fatal("did not capture the confirmed retry")
+	}
+	replay := &mcp.CallToolParams{Name: c.Name, Arguments: json.RawMessage(c.Arguments), RequestState: c.RequestState, InputResponses: c.InputResponses}
+	for i := 0; i < 3; i++ {
+		res, err := e.cs.CallTool(context.Background(), replay)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatalf("replay %d accepted: %+v", i, res)
+		}
+	}
+	if n := countMutations(e.stub.mutations(), "PUT /asks/"); n != 1 {
+		t.Fatalf("expected exactly one create, got %d", n)
+	}
+}
+
+func countMutations(muts []string, prefix string) int {
+	n := 0
+	for _, m := range muts {
+		if strings.HasPrefix(m, prefix) {
+			n++
+		}
+	}
+	return n
 }
 
 func TestRepriceBetweenPreviewAndApproval(t *testing.T) {
@@ -530,7 +602,8 @@ func TestRepriceBetweenPreviewAndApproval(t *testing.T) {
 	}
 	e = newEnv(t, Config{Confirm: true}, bump)
 	out, isErr := e.call(t, "vast_create_instance", map[string]any{"offer_id": 42, "image": "x"})
-	if !isErr || !strings.Contains(out, "price changed") {
+	aborted := strings.Contains(out, "price changed") || strings.Contains(out, "target changed")
+	if !isErr || !aborted {
 		t.Fatalf("repriced create should abort: %q", out)
 	}
 	if hasMutation(e.stub.mutations(), "PUT /asks/") {

@@ -44,7 +44,7 @@ func (d *deps) confirm(req *mcp.CallToolRequest, confirmArg bool, tool, action, 
 			return nil, fmt.Errorf("%w: cannot canonicalise arguments: %v", ErrNotConfirmed, err)
 		}
 		if resp, ok := req.Params.InputResponses[confirmKey]; ok {
-			if err := d.signer.verify(req.Params.RequestState, tool, argHash, price); err != nil {
+			if err := d.signer.verify(req.Params.RequestState, tool, argHash, price, hashPreview(preview)); err != nil {
 				return nil, fmt.Errorf("%w: %v", errRefused, err)
 			}
 			er, ok := resp.(*mcp.ElicitResult)
@@ -59,7 +59,7 @@ func (d *deps) confirm(req *mcp.CallToolRequest, confirmArg bool, tool, action, 
 			}
 			return nil, nil
 		}
-		state, err := d.signer.sign(confirmState{Tool: tool, ArgHash: argHash, Price: price})
+		state, err := d.signer.sign(confirmState{Tool: tool, ArgHash: argHash, Price: price, PreviewHash: hashPreview(preview)})
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +149,8 @@ func capText(s string, max int) string {
 		return s
 	}
 	cut := vast.Truncate(s, max)
-	return cut + fmt.Sprintf("\n…[truncated %d bytes]", len(s)-len(cut)+len("…"))
+	kept := len(cut) - len("…")
+	return cut + fmt.Sprintf("\n…[truncated %d bytes]", len(s)-kept)
 }
 
 // ---- redaction ------------------------------------------------------------

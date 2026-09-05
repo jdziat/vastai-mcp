@@ -471,6 +471,17 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		return d.errResult(err)
 	}
 
+	if d.cfg.MaxInstances > 0 {
+		// Re-check after approval: two concurrently approved creates must not both land.
+		list, err := d.c.ListInstances(ctx)
+		if err != nil {
+			return d.errResult(fmt.Errorf("count instances: %w", err))
+		}
+		if len(list) >= d.cfg.MaxInstances {
+			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_instances", "count": len(list), "cap": d.cfg.MaxInstances})
+			return d.errResult(fmt.Errorf("%d instances already exist; -max-instances cap is %d", len(list), d.cfg.MaxInstances))
+		}
+	}
 	p := vast.CreateInstanceParams{
 		Image: a.Image, Disk: disk, Label: a.Label, OnStart: a.OnStart, RunType: a.RunType,
 		Env: a.Env, ImageLogin: a.ImageLogin, Price: a.BidPrice, TemplateHashID: a.TemplateHashID, CancelUnavail: a.CancelUnavail,
