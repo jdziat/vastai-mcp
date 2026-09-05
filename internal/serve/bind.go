@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -59,7 +60,10 @@ func LoadToken(tokenFile string) (string, error) {
 	if tokenFile == "" {
 		return "", nil
 	}
-	b, err := os.ReadFile(tokenFile)
+	if fi, err := os.Stat(tokenFile); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		log.Printf("vastai-mcp: warning: %s is readable by group/other (mode %o); consider chmod 600", tokenFile, fi.Mode().Perm())
+	}
+	b, err := os.ReadFile(tokenFile) // #nosec G304 -- operator-supplied path by design
 	if err != nil {
 		return "", fmt.Errorf("read -http-token-file: %w", err)
 	}

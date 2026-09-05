@@ -16,9 +16,10 @@ import (
 )
 
 type deps struct {
-	c     *vast.Client
-	cfg   Config
-	audit *auditor
+	c      *vast.Client
+	cfg    Config
+	audit  *auditor
+	signer *stateSigner
 }
 
 // ReadOnlyTools and MutatingTools list the registered tool names by class.
@@ -42,7 +43,7 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 	if cfg.Audit == nil {
 		cfg.Audit = os.Stderr
 	}
-	d := &deps{c: c, cfg: cfg, audit: &auditor{w: cfg.Audit}}
+	d := &deps{c: c, cfg: cfg, audit: &auditor{w: cfg.Audit}, signer: newStateSigner()}
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_search_offers",
@@ -146,6 +147,20 @@ func (d *deps) jsonResult(v any) (*mcp.CallToolResult, any, error) {
 
 func (d *deps) textResult(s string) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: capText(s, d.cfg.maxOutput())}}}, nil, nil
+}
+
+// declined renders a not-confirmed outcome. A plain "needs confirmation"
+// preview is not an error; an explicit user refusal or a bad/forged
+// confirmation state is, so the model does not mistake it for success.
+func (d *deps) declined(v map[string]any, err error) (*mcp.CallToolResult, any, error) {
+	res, out, e := d.jsonResult(v)
+	if e != nil {
+		return res, out, e
+	}
+	if errors.Is(err, errRefused) {
+		res.IsError = true
+	}
+	return res, out, nil
 }
 
 func (d *deps) errResult(err error) (*mcp.CallToolResult, any, error) {
@@ -364,19 +379,20 @@ type CreateInstanceArgs struct {
 	Confirm        bool              `json:"confirm,omitempty" jsonschema:"Set true only after the user has approved the preview returned by a previous call"`
 }
 
-func num(v any) float64 {
+// num extracts a numeric field; ok is false when absent or not a number.
+func num(v any) (float64, bool) {
 	switch x := v.(type) {
 	case float64:
-		return x
+		return x, true
 	case int:
-		return float64(x)
+		return float64(x), true
 	case int64:
-		return float64(x)
+		return float64(x), true
 	case json.Number:
-		f, _ := x.Float64()
-		return f
+		f, err := x.Float64()
+		return f, err == nil
 	}
-	return 0
+	return 0, false
 }
 
 func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a CreateInstanceArgs) (*mcp.CallToolResult, any, error) {
@@ -401,17 +417,25 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "offer not found"})
 		return d.errResult(fmt.Errorf("offer %d not found (it may have been rented or withdrawn); search again", a.OfferID))
 	}
-	hourly := num(offer["dph_total"])
+	hourly, priceKnown := num(offer["dph_total"])
 	if a.BidPrice > 0 {
-		hourly = a.BidPrice
-		if mb := num(offer["min_bid"]); a.BidPrice < mb {
+		hourly, priceKnown = a.BidPrice, true
+		if mb, ok := num(offer["min_bid"]); ok && a.BidPrice < mb {
 			return d.errResult(fmt.Errorf("bid_price %.4f is below the offer's min_bid %.4f", a.BidPrice, mb))
 		}
 	}
-	storageHourly := num(offer["storage_cost"]) * disk / 730 // $/GB/month → $/hr
-	if d.cfg.MaxDPH > 0 && hourly > d.cfg.MaxDPH {
-		d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_dph", "dph": hourly, "cap": d.cfg.MaxDPH})
-		return d.errResult(fmt.Errorf("offer costs $%.4f/hr which exceeds the configured -max-dph cap of $%.4f/hr", hourly, d.cfg.MaxDPH))
+	storageCost, storageKnown := num(offer["storage_cost"])
+	storageHourly := storageCost * disk / 730 // $/GB/month → $/hr
+	total := hourly + storageHourly
+	if d.cfg.MaxDPH > 0 {
+		if !priceKnown || !storageKnown {
+			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "price unknown"})
+			return d.errResult(fmt.Errorf("offer %d has no usable dph_total/storage_cost; refusing to create while -max-dph is set", a.OfferID))
+		}
+		if total > d.cfg.MaxDPH {
+			d.audit.log(tool, req.Params.Arguments, "rejected", map[string]any{"reason": "max_dph", "total_usd_hr": total, "cap": d.cfg.MaxDPH})
+			return d.errResult(fmt.Errorf("offer costs $%.4f/hr including $%.4f/hr storage, which exceeds the -max-dph cap of $%.4f/hr", total, storageHourly, d.cfg.MaxDPH))
+		}
 	}
 	if d.cfg.MaxInstances > 0 {
 		list, err := d.c.ListInstances(ctx)
@@ -432,17 +456,17 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		"label":                  a.Label,
 		"estimated_gpu_usd_hr":   round4(hourly),
 		"estimated_disk_usd_hr":  round4(storageHourly),
-		"estimated_total_usd_hr": round4(hourly + storageHourly),
-		"estimated_usd_per_day":  round4((hourly + storageHourly) * 24),
+		"estimated_total_usd_hr": round4(total),
+		"estimated_usd_per_day":  round4(total * 24),
 	}
 	pb, _ := json.MarshalIndent(preview, "", "  ")
-	if ask, err := d.confirm(req, a.Confirm, "creating this instance", string(pb)); ask != nil || err != nil {
+	if ask, err := d.confirm(req, a.Confirm, tool, "creating this instance", string(pb), total); ask != nil || err != nil {
 		if ask != nil {
 			return ask, nil, nil
 		}
-		d.audit.log(tool, req.Params.Arguments, "not_confirmed", nil)
+		d.audit.log(tool, req.Params.Arguments, "not_confirmed", map[string]any{"reason": err.Error()})
 		if errors.Is(err, ErrNotConfirmed) {
-			return d.jsonResult(map[string]any{"status": "not_created", "reason": err.Error(), "preview": preview})
+			return d.declined(map[string]any{"status": "not_created", "reason": err.Error(), "preview": preview}, err)
 		}
 		return d.errResult(err)
 	}
@@ -459,13 +483,14 @@ func (d *deps) createInstance(ctx context.Context, req *mcp.CallToolRequest, a C
 		d.audit.log(tool, req.Params.Arguments, "error", map[string]any{"error": err.Error()})
 		return d.errResult(err)
 	}
-	d.audit.log(tool, req.Params.Arguments, "created", map[string]any{"instance_id": res.NewContract, "estimated_usd_hr": hourly})
+	d.audit.log(tool, req.Params.Arguments, "created", map[string]any{"instance_id": res.NewContract, "estimated_usd_hr": total})
 
 	out := map[string]any{"status": "created", "instance_id": res.NewContract, "preview": preview}
 	// Post-create TOCTOU check: the offer may have repriced between lookup and PUT.
 	if d.cfg.MaxDPH > 0 && res.NewContract > 0 {
 		if inst, err := d.c.ShowInstance(ctx, res.NewContract); err == nil && inst != nil {
-			actual := num(inst["dph_total"])
+			actual, _ := num(inst["dph_total"])
+			actual += storageHourly
 			out["actual_usd_hr"] = round4(actual)
 			if actual > d.cfg.MaxDPH {
 				d.audit.log(tool, req.Params.Arguments, "PRICE_BREACH", map[string]any{"instance_id": res.NewContract, "actual_usd_hr": actual, "cap": d.cfg.MaxDPH})
@@ -494,13 +519,13 @@ func (d *deps) destroyInstance(ctx context.Context, req *mcp.CallToolRequest, a 
 	}
 	preview := pick(inst, []string{"id", "label", "actual_status", "gpu_name", "num_gpus", "image_uuid", "dph_total", "disk_space", "start_date"})
 	pb, _ := json.MarshalIndent(preview, "", "  ")
-	if ask, err := d.confirm(req, a.Confirm, fmt.Sprintf("DESTROYING instance %d (irreversible, deletes its disk)", a.ID), string(pb)); ask != nil || err != nil {
+	if ask, err := d.confirm(req, a.Confirm, tool, fmt.Sprintf("DESTROYING instance %d (irreversible, deletes its disk)", a.ID), string(pb), 0); ask != nil || err != nil {
 		if ask != nil {
 			return ask, nil, nil
 		}
-		d.audit.log(tool, req.Params.Arguments, "not_confirmed", nil)
+		d.audit.log(tool, req.Params.Arguments, "not_confirmed", map[string]any{"reason": err.Error()})
 		if errors.Is(err, ErrNotConfirmed) {
-			return d.jsonResult(map[string]any{"status": "not_destroyed", "reason": err.Error(), "instance": preview})
+			return d.declined(map[string]any{"status": "not_destroyed", "reason": err.Error(), "instance": preview}, err)
 		}
 		return d.errResult(err)
 	}
@@ -558,7 +583,7 @@ func (d *deps) instanceLogs(ctx context.Context, _ *mcp.CallToolRequest, a LogsA
 	if err != nil {
 		return d.errResult(err)
 	}
-	return d.textResult(wrapUntrusted(fmt.Sprintf("instance %d logs", a.ID), out))
+	return d.textResult(wrapUntrusted(fmt.Sprintf("instance %d logs", a.ID), out, d.cfg.maxOutput()))
 }
 
 type ExecArgs struct {
@@ -575,13 +600,13 @@ func (d *deps) execute(ctx context.Context, req *mcp.CallToolRequest, a ExecArgs
 		return d.errResult(err)
 	}
 	if first == "rm" {
-		if ask, err := d.confirm(req, a.Confirm, fmt.Sprintf("running `%s` on instance %d", a.Command, a.ID), "This deletes files inside the container."); ask != nil || err != nil {
+		if ask, err := d.confirm(req, a.Confirm, tool, fmt.Sprintf("running `%s` on instance %d", a.Command, a.ID), "This deletes files inside the container.", 0); ask != nil || err != nil {
 			if ask != nil {
 				return ask, nil, nil
 			}
-			d.audit.log(tool, req.Params.Arguments, "not_confirmed", nil)
+			d.audit.log(tool, req.Params.Arguments, "not_confirmed", map[string]any{"reason": err.Error()})
 			if errors.Is(err, ErrNotConfirmed) {
-				return d.jsonResult(map[string]any{"status": "not_run", "reason": err.Error(), "command": a.Command})
+				return d.declined(map[string]any{"status": "not_run", "reason": err.Error(), "command": a.Command}, err)
 			}
 			return d.errResult(err)
 		}
@@ -592,7 +617,7 @@ func (d *deps) execute(ctx context.Context, req *mcp.CallToolRequest, a ExecArgs
 		return d.errResult(err)
 	}
 	d.audit.log(tool, req.Params.Arguments, "ok", nil)
-	return d.textResult(wrapUntrusted(fmt.Sprintf("instance %d command output", a.ID), out))
+	return d.textResult(wrapUntrusted(fmt.Sprintf("instance %d command output", a.ID), out, d.cfg.maxOutput()))
 }
 
 // ---- account ------------------------------------------------------------

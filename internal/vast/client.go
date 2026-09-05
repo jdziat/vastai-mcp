@@ -61,7 +61,7 @@ func LoadAPIKey() (string, error) {
 		filepath.Join(home, ".config", "vastai", "vast_api_key"),
 		filepath.Join(home, ".vast_api_key"),
 	} {
-		if b, err := os.ReadFile(p); err == nil {
+		if b, err := os.ReadFile(p); err == nil { // #nosec G304 -- fixed paths under $HOME
 			if v := strings.TrimSpace(string(b)); v != "" {
 				return v, nil
 			}
@@ -172,7 +172,7 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes))
 	if err != nil {
 		return nil, resp.StatusCode, 0, err
@@ -205,7 +205,7 @@ func backoff(attempt int, retryAfter time.Duration) time.Duration {
 		return retryAfter
 	}
 	base := 500 * time.Millisecond << attempt
-	jitter := time.Duration(rand.Int64N(int64(base / 2)))
+	jitter := time.Duration(rand.Int64N(int64(base / 2))) // #nosec G404 -- backoff jitter, not security-sensitive
 	return base + jitter
 }
 
@@ -219,7 +219,7 @@ func (c *Client) FetchURL(ctx context.Context, u string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes))
 	return raw, resp.StatusCode, err
 }

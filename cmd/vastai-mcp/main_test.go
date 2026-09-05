@@ -158,3 +158,21 @@ func TestStdioExitsCleanOnEOF(t *testing.T) {
 		t.Fatalf("stdio EOF should exit 0: %v", err)
 	}
 }
+
+func TestMalformedGuardrailEnvRefusesStart(t *testing.T) {
+	for _, kv := range []string{"VASTAI_MAX_DPH=$0.50", "VASTAI_MAX_INSTANCES=ten", "VASTAI_READ_ONLY=maybe", "VASTAI_CONFIRM=nah", "VASTAI_MAX_DPH=-1"} {
+		cmd := exec.Command(binPath, "-version")
+		cmd.Env = []string{"VASTAI_API_KEY=test", "HOME=" + t.TempDir(), kv}
+		cmd.Dir = t.TempDir()
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "is not") {
+			t.Errorf("%s: expected refusal, got err=%v out=%s", kv, err, out)
+		}
+	}
+	cmd := exec.Command(binPath, "-version")
+	cmd.Env = []string{"VASTAI_API_KEY=test", "HOME=" + t.TempDir(), "VASTAI_READ_ONLY=yes", "VASTAI_MAX_DPH=0.5"}
+	cmd.Dir = t.TempDir()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("valid env refused: %s", out)
+	}
+}

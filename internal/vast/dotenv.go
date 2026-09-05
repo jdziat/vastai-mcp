@@ -33,7 +33,7 @@ func LoadDotEnv(paths ...string) (DotEnvResult, error) {
 		paths = []string{".env"}
 	}
 	for _, p := range paths {
-		f, err := os.Open(p)
+		f, err := os.Open(p) // #nosec G304 -- caller-supplied path, only allowlisted keys are read
 		if err != nil {
 			continue
 		}
@@ -68,7 +68,7 @@ func LoadDotEnv(paths ...string) (DotEnvResult, error) {
 				continue
 			}
 			if err := os.Setenv(k, v); err != nil {
-				f.Close()
+				_ = f.Close()
 				return res, fmt.Errorf("set %s from %s: %w", k, p, err)
 			}
 			res.Set = append(res.Set, k)

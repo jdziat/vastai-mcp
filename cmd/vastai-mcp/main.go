@@ -48,15 +48,23 @@ func run() int {
 	tlsKey := flag.String("tls-key", "", "TLS key for -http")
 	insecureHTTP := flag.Bool("insecure-http", false, "allow a non-loopback -http bind without TLS (bearer token is sent in plaintext)")
 	flag.StringVar(&baseURL, "base-url", baseURL, "Vast.ai API base URL (https required)")
-	maxDPH := flag.Float64("max-dph", envFloat("VASTAI_MAX_DPH"), "reject vast_create_instance above this $/hr (0 = unlimited)")
-	maxInst := flag.Int("max-instances", envInt("VASTAI_MAX_INSTANCES"), "reject vast_create_instance when this many instances exist (0 = unlimited)")
-	readOnly := flag.Bool("read-only", envBool("VASTAI_READ_ONLY", false), "register only read-only tools")
-	confirm := flag.Bool("confirm", envBool("VASTAI_CONFIRM", true), "require human confirmation for create/destroy/rm")
+	envErrs := []error{}
+	maxDPH := flag.Float64("max-dph", envFloat("VASTAI_MAX_DPH", &envErrs), "reject vast_create_instance when GPU + storage cost exceeds this $/hr (0 = unlimited)")
+	maxInst := flag.Int("max-instances", envInt("VASTAI_MAX_INSTANCES", &envErrs), "reject vast_create_instance when this many instances exist (0 = unlimited)")
+	readOnly := flag.Bool("read-only", envBool("VASTAI_READ_ONLY", false, &envErrs), "register only read-only tools")
+	confirm := flag.Bool("confirm", envBool("VASTAI_CONFIRM", true, &envErrs), "require human confirmation for create/destroy/rm")
 	auditPath := flag.String("audit-log", os.Getenv("VASTAI_AUDIT_LOG"), "append audit records of mutating calls to this file (mode 0600); stderr always receives them")
 	exposeSecrets := flag.Bool("expose-instance-secrets", false, "return jupyter_token and similar fields to the model")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
+	if len(envErrs) > 0 {
+		// Fail closed: a typo in a guardrail variable must not mean "no limit".
+		for _, e := range envErrs {
+			log.Printf("vastai-mcp: %v", e)
+		}
+		return 2
+	}
 	if *showVersion {
 		fmt.Println("vastai-mcp", buildVersion())
 		return 0
@@ -119,7 +127,7 @@ func run() int {
 			log.Printf("vastai-mcp: open audit log: %v", err)
 			return 2
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		auditW = io.MultiWriter(os.Stderr, f)
 	}
 	cfg.Audit = auditW
@@ -160,7 +168,7 @@ func runHTTP(ctx context.Context, server *mcp.Server, addr, token, cert, key str
 		// No WriteTimeout: it would sever long-lived SSE streams.
 	}
 	done := make(chan struct{})
-	go func() {
+	go func() { // #nosec G118 -- shutdown must outlive the cancelled signal context
 		defer close(done)
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -201,24 +209,46 @@ func envOr(key, def string) string {
 	return def
 }
 
-func envFloat(key string) float64 {
-	f, _ := strconv.ParseFloat(os.Getenv(key), 64)
+// The env parsers record an error for any non-empty unparseable value so
+// main can refuse to start rather than silently running without a guardrail.
+
+func envFloat(key string, errs *[]error) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 {
+		*errs = append(*errs, fmt.Errorf("%s=%q is not a non-negative number", key, v))
+		return 0
+	}
 	return f
 }
 
-func envInt(key string) int {
-	n, _ := strconv.Atoi(os.Getenv(key))
+func envInt(key string, errs *[]error) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		*errs = append(*errs, fmt.Errorf("%s=%q is not a non-negative integer", key, v))
+		return 0
+	}
 	return n
 }
 
-func envBool(key string, def bool) bool {
-	v := os.Getenv(key)
+func envBool(key string, def bool, errs *[]error) bool {
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return def
+	switch strings.ToLower(v) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	case "0", "f", "false", "n", "no", "off":
+		return false
 	}
-	return b
+	*errs = append(*errs, fmt.Errorf("%s=%q is not a boolean", key, v))
+	return def
 }

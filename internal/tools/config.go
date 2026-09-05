@@ -43,7 +43,7 @@ func (c *Config) maxOutput() int {
 
 // OpenAuditLog opens (or creates, mode 0600) an append-only audit file.
 func OpenAuditLog(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- operator-supplied path by design
 }
 
 // auditor writes structured audit lines. Never logs credentials.
@@ -78,16 +78,16 @@ func redactArgs(args any) any {
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		switch {
-		case k == "image_login":
+		switch k {
+		case "image_login":
 			out[k] = "<redacted>"
-		case k == "public_key":
+		case "public_key":
 			if s, ok := v.(string); ok {
 				out[k] = keyFingerprint(s)
 			} else {
 				out[k] = "<redacted>"
 			}
-		case k == "env":
+		case "env":
 			if em, ok := v.(map[string]any); ok {
 				keys := make([]string, 0, len(em))
 				for ek := range em {
