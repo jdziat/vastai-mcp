@@ -172,8 +172,12 @@ func (e *env) call(t *testing.T, name string, args map[string]any) (string, bool
 	return sb.String(), res.IsError
 }
 
+// accept mirrors a client that renders Accept as a button and returns no form content.
 func accept(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-	return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+	return &mcp.ElicitResult{Action: "accept"}, nil
+}
+func acceptUnchecked(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": false}}, nil
 }
 func decline(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
 	return &mcp.ElicitResult{Action: "decline"}, nil
@@ -802,5 +806,18 @@ func TestBidCreateRejectsUnknownStorage(t *testing.T) {
 	out, isErr := e.call(t, "vast_create_instance", map[string]any{"offer_id": 42, "image": "x", "bid_price": 0.98})
 	if !isErr || !strings.Contains(out, "storage_total_cost") || hasMutation(e.stub.mutations(), "PUT /asks/") {
 		t.Fatalf("bid with unknown storage must be refused under -max-dph: %q", out)
+	}
+}
+
+func TestAcceptWithoutFormContentConfirms(t *testing.T) {
+	e := newEnv(t, Config{Confirm: true, ConfirmArgAllowed: false}, accept)
+	out, isErr := e.call(t, "vast_destroy_instance", map[string]any{"id": 777})
+	if isErr || !strings.Contains(out, `"status": "destroyed"`) {
+		t.Fatalf("bare accept must confirm: %q", out)
+	}
+	u := newEnv(t, Config{Confirm: true, ConfirmArgAllowed: false}, acceptUnchecked)
+	out, _ = u.call(t, "vast_destroy_instance", map[string]any{"id": 777})
+	if !strings.Contains(out, "not_destroyed") || hasMutation(u.stub.mutations(), "DELETE ") {
+		t.Fatalf("explicit confirm=false must refuse: %q", out)
 	}
 }

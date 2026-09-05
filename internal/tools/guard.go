@@ -54,7 +54,10 @@ func (d *deps) confirm(req *mcp.CallToolRequest, confirmArg bool, tool, action, 
 			if er.Action != "accept" {
 				return nil, fmt.Errorf("%w: user %sed %s", errRefused, er.Action, action)
 			}
-			if v, ok := er.Content[confirmKey].(bool); !ok || !v {
+			// The accept action is the confirmation. Clients render accept as
+			// a button and may return no form content at all, so no field is
+			// required; an explicit confirm=false in the content still refuses.
+			if v, ok := er.Content[confirmKey].(bool); ok && !v {
 				return nil, fmt.Errorf("%w: user did not confirm %s", errRefused, action)
 			}
 			return nil, nil
@@ -66,12 +69,12 @@ func (d *deps) confirm(req *mcp.CallToolRequest, confirmArg bool, tool, action, 
 		return &mcp.CallToolResult{
 			InputRequests: mcp.InputRequestMap{confirmKey: &mcp.ElicitParams{
 				Message: fmt.Sprintf("Confirm %s?\n\n%s", action, preview),
+				// No required fields: pressing Accept must be enough.
 				RequestedSchema: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						confirmKey: map[string]any{"type": "boolean", "title": "Confirm " + action},
+						confirmKey: map[string]any{"type": "boolean", "title": "Confirm " + action, "description": "Optional; Accept alone confirms"},
 					},
-					"required": []string{confirmKey},
 				},
 			}},
 			RequestState: state,
