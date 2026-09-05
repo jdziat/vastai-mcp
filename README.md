@@ -125,9 +125,11 @@ elicitation.
 | `vast_show_user` | Account info and credit balance |
 | `vast_list_ssh_keys` / `vast_create_ssh_key` / `vast_attach_ssh_key` | Manage SSH keys |
 
-`vast_search_offers` and `vast_search_templates` accept a `raw_query` /
-`raw_filters` JSON object for any Vast.ai query field not exposed as a
-parameter (see `vastai search offers --help` for the field list).
+`vast_search_offers` exposes the common filters as parameters; anything else
+(`geolocation`, `inet_down`, `static_ip`, `direct_port_count`,
+`cuda_max_good`, ...) goes in `raw_query` as a Vast.ai JSON query object.
+`vast_search_templates` takes `raw_filters` the same way. See
+`vastai search offers --help` for the field list.
 
 ## Development
 

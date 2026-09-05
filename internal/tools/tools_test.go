@@ -444,6 +444,10 @@ func TestSearchOffersQueryAndLimit(t *testing.T) {
 	if !isErr {
 		t.Error("bad raw_query accepted")
 	}
+	out, _ = e.call(t, "vast_search_offers", map[string]any{"raw_query": `{"geolocation":{"eq":"US"},"static_ip":{"eq":true}}`})
+	if !strings.Contains(out, `"geolocation"`) || !strings.Contains(out, `"static_ip"`) {
+		t.Errorf("raw_query fields not merged: %s", out)
+	}
 }
 
 func TestShowUserStripsCredentials(t *testing.T) {

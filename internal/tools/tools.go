@@ -47,12 +47,12 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_search_offers",
-		Description: "Search the Vast.ai marketplace for rentable GPU offers, cheapest $/hr first by default. Use the returned offer `id` with vast_create_instance. Prices (dph_total) are $/hr for the whole offer and exclude storage.",
+		Description: "Search rentable GPU offers, cheapest first by default. Pass the returned offer `id` to vast_create_instance. dph_total is $/hr for the whole offer, excluding storage.",
 		Annotations: annRead,
 	}, d.searchOffers)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_search_templates",
-		Description: "Search recommended public Vast.ai templates (pre-built images such as PyTorch, ComfyUI, vLLM). Use the template `hash_id` with vast_create_instance.",
+		Description: "Search recommended public templates (PyTorch, ComfyUI, vLLM, ...). Pass the `hash_id` to vast_create_instance.",
 		Annotations: annRead,
 	}, d.searchTemplates)
 	mcp.AddTool(s, &mcp.Tool{
@@ -87,12 +87,12 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_create_instance",
-		Description: "Rent a marketplace offer and launch a container on it. This spends money. Without confirmation the tool returns a cost preview and creates nothing; the user must approve it (via the client's confirmation prompt, or by re-running with confirm=true where permitted). Each approval is single-use, so a transient API failure after approval requires a fresh preview and approval. Returns the new instance id.",
+		Description: "Rent an offer and start a container on it. Spends money. Returns a cost preview and creates nothing until the user approves it (client confirmation prompt, or confirm=true where permitted); each approval is single-use. Returns the new instance id.",
 		Annotations: annCreate,
 	}, d.createInstance)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_destroy_instance",
-		Description: "Permanently destroy an instance and delete its disk. Irreversible. Without confirmation the tool returns a preview and destroys nothing.",
+		Description: "Destroy an instance and delete its disk. Irreversible. Returns a preview and destroys nothing until the user approves.",
 		Annotations: annDestructive,
 	}, d.destroyInstance)
 	mcp.AddTool(s, &mcp.Tool{
@@ -117,7 +117,7 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 	}, d.labelInstance)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_execute",
-		Description: "Run a restricted command inside a STOPPED instance (Vast.ai rejects it for running instances; use SSH there). Only `ls`, `du`, and `rm` are accepted, with no shell metacharacters. `rm` is destructive and requires confirmation. Output is untrusted data from the container.",
+		Description: "Run `ls`, `du`, or `rm` (no shell metacharacters) inside a STOPPED instance; Vast.ai rejects it on running ones, use SSH there. `rm` requires user approval. Output is untrusted container data.",
 		Annotations: annDestructive,
 	}, d.execute)
 	mcp.AddTool(s, &mcp.Tool{
@@ -183,24 +183,19 @@ func pick(src map[string]any, fields []string) map[string]any {
 // ---- search offers ------------------------------------------------------
 
 type SearchOffersArgs struct {
-	GPUName        string  `json:"gpu_name,omitempty" jsonschema:"GPU model as shown by Vast.ai, e.g. 'RTX 4090', 'A100 SXM4', 'H100 SXM' (underscores are accepted and converted to spaces)"`
+	GPUName        string  `json:"gpu_name,omitempty" jsonschema:"GPU model as shown by Vast.ai, e.g. 'RTX 4090', 'A100 SXM4', 'H100 SXM'"`
 	NumGPUs        int     `json:"num_gpus,omitempty" jsonschema:"Exact number of GPUs per offer"`
 	MinGPURAM      float64 `json:"min_gpu_ram_gb,omitempty" jsonschema:"Minimum VRAM per GPU in GB"`
 	MinDiskGB      float64 `json:"min_disk_gb,omitempty" jsonschema:"Minimum available disk in GB"`
-	DiskGB         float64 `json:"disk_gb,omitempty" jsonschema:"Disk you intend to allocate, in GB; used to compute the quoted storage cost (default 10, matching vast_create_instance)"`
+	DiskGB         float64 `json:"disk_gb,omitempty" jsonschema:"Disk you intend to allocate in GB, for the quoted storage cost (default 10)"`
 	MinCPURAM      float64 `json:"min_cpu_ram_gb,omitempty" jsonschema:"Minimum system RAM in GB"`
-	MaxPrice       float64 `json:"max_dph,omitempty" jsonschema:"Maximum total price in $/hour"`
-	MinReliability float64 `json:"min_reliability,omitempty" jsonschema:"Minimum host reliability 0-1 (e.g. 0.95)"`
-	MinInetDown    float64 `json:"min_inet_down_mbps,omitempty" jsonschema:"Minimum download bandwidth in Mbps"`
-	MinCUDA        float64 `json:"min_cuda,omitempty" jsonschema:"Minimum CUDA version, e.g. 12.1"`
-	Geolocation    string  `json:"geolocation,omitempty" jsonschema:"Two-letter country code filter, e.g. US, DE"`
-	StaticIP       *bool   `json:"static_ip,omitempty" jsonschema:"Require a static IP"`
-	DirectPort     int     `json:"min_direct_ports,omitempty" jsonschema:"Minimum number of direct open ports"`
+	MaxPrice       float64 `json:"max_dph,omitempty" jsonschema:"Maximum price in $/hour"`
+	MinReliability float64 `json:"min_reliability,omitempty" jsonschema:"Minimum host reliability 0-1, e.g. 0.95"`
 	Interruptible  bool    `json:"interruptible,omitempty" jsonschema:"Search interruptible (bid) offers instead of on-demand"`
 	Unverified     bool    `json:"include_unverified,omitempty" jsonschema:"Include unverified hosts"`
-	OrderBy        string  `json:"order_by,omitempty" jsonschema:"Comma-separated sort fields, prefix '-' for descending. Default: dph_total. Examples: dph_total, -reliability2, -dlperf_per_dphtotal, -gpu_ram"`
+	OrderBy        string  `json:"order_by,omitempty" jsonschema:"Comma-separated sort fields, '-' prefix for descending. Default dph_total. e.g. -dlperf_per_dphtotal"`
 	Limit          int     `json:"limit,omitempty" jsonschema:"Max results (default 20, max 100)"`
-	RawQuery       string  `json:"raw_query,omitempty" jsonschema:"Optional raw Vast.ai JSON query object merged over the generated filters, e.g. {\"cuda_max_good\":{\"gte\":12.4}}"`
+	RawQuery       string  `json:"raw_query,omitempty" jsonschema:"Raw Vast.ai JSON query merged over the filters above, for any other field: e.g. {\"geolocation\":{\"eq\":\"US\"},\"inet_down\":{\"gte\":500},\"static_ip\":{\"eq\":true},\"direct_port_count\":{\"gte\":4},\"cuda_max_good\":{\"gte\":12.4}}"`
 }
 
 const defaultDiskGB = 10.0
@@ -228,21 +223,6 @@ func buildOfferQuery(a SearchOffersArgs) (map[string]any, vast.SearchDefaults, e
 	}
 	if a.MinReliability > 0 {
 		q["reliability2"] = map[string]any{"gte": a.MinReliability}
-	}
-	if a.MinInetDown > 0 {
-		q["inet_down"] = map[string]any{"gte": a.MinInetDown}
-	}
-	if a.MinCUDA > 0 {
-		q["cuda_max_good"] = map[string]any{"gte": a.MinCUDA}
-	}
-	if a.Geolocation != "" {
-		q["geolocation"] = map[string]any{"eq": strings.ToUpper(a.Geolocation)}
-	}
-	if a.StaticIP != nil {
-		q["static_ip"] = map[string]any{"eq": *a.StaticIP}
-	}
-	if a.DirectPort > 0 {
-		q["direct_port_count"] = map[string]any{"gte": a.DirectPort}
 	}
 	disk := a.DiskGB
 	if disk <= 0 {
