@@ -61,10 +61,12 @@ func LoadAPIKey() (string, error) {
 		filepath.Join(home, ".config", "vastai", "vast_api_key"),
 		filepath.Join(home, ".vast_api_key"),
 	} {
-		if b, err := os.ReadFile(p); err == nil { // #nosec G304 -- fixed paths under $HOME
-			if v := strings.TrimSpace(string(b)); v != "" {
-				return v, nil
-			}
+		b, err := os.ReadFile(p) // #nosec G304 -- fixed paths under $HOME
+		if err != nil {
+			continue
+		}
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v, nil
 		}
 	}
 	return "", errors.New("no Vast.ai API key found: set VASTAI_API_KEY or write ~/.config/vastai/vast_api_key")
