@@ -59,7 +59,7 @@ These are enforced inside the server and do not rely on the model.
 | --- | --- | --- | --- |
 | `-confirm` | `VASTAI_CONFIRM` | `true` | `vast_create_instance`, `vast_destroy_instance`, and `vast_execute rm …` return a cost/impact preview and ask the user through the client's confirmation prompt (MCP elicitation). The answer is bound to the previewed arguments and price with a signed token; a decline is final. Clients without elicitation may pass `confirm: true` on stdio or loopback only. On such clients the check is advisory, since the model sets the flag; use `-max-dph`, `-max-instances`, or `-read-only` for enforcement there. |
 | `-max-dph` | `VASTAI_MAX_DPH` | `0` (off) | Reject creates whose GPU plus storage cost exceeds this $/hr. Checked against the live offer before the request and against the real instance price after. A malformed value refuses to start. |
-| `-max-instances` | `VASTAI_MAX_INSTANCES` | `0` (off) | Reject creates when this many instances already exist. |
+| `-max-instances` | `VASTAI_MAX_INSTANCES` | `0` (off) | Reject creates when this many instances already exist. Checked before and after approval; two approvals interleaving within the same second can still overshoot by one, since Vast.ai has no server-side reservation. |
 | `-read-only` | `VASTAI_READ_ONLY` | `false` | Register only the read-only tools. |
 | `-audit-log FILE` | `VASTAI_AUDIT_LOG` | | Append one JSON record per mutating call (mode 0600). stderr always receives them. Credentials are never logged. |
 | `-expose-instance-secrets` | | `false` | Return `jupyter_token` and similar fields to the model. |

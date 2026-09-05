@@ -147,20 +147,23 @@ func (s *stateSigner) verify(token, tool, argHash string, price float64, preview
 	if st.PreviewHash != previewHash {
 		return fmt.Errorf("the target changed since the preview was approved; re-run to get a fresh preview")
 	}
-	if !priceMatches(st.Price, price) {
-		return fmt.Errorf("the price changed since the preview was approved (was $%.4f/hr, now $%.4f/hr); re-run to get a fresh preview", st.Price, price)
-	}
+	// Consume the nonce before the price check too: an approval whose price
+	// drifted out and back must not become usable again.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for n, exp := range s.used { // sweep expired entries; the map is bounded by TTL
 		if exp < now {
 			delete(s.used, n)
 		}
 	}
-	if _, seen := s.used[st.Nonce]; seen {
+	_, seen := s.used[st.Nonce]
+	s.used[st.Nonce] = st.Expires
+	s.mu.Unlock()
+	if seen {
 		return errStateUsed
 	}
-	s.used[st.Nonce] = st.Expires
+	if !priceMatches(st.Price, price) {
+		return fmt.Errorf("the price changed since the preview was approved (was $%.4f/hr, now $%.4f/hr); re-run to get a fresh preview", st.Price, price)
+	}
 	return nil
 }
 

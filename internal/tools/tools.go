@@ -87,7 +87,7 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "vast_create_instance",
-		Description: "Rent a marketplace offer and launch a container on it. This spends money. Without confirmation the tool returns a cost preview and creates nothing; the user must approve it (via the client's confirmation prompt, or by re-running with confirm=true where permitted). Returns the new instance id.",
+		Description: "Rent a marketplace offer and launch a container on it. This spends money. Without confirmation the tool returns a cost preview and creates nothing; the user must approve it (via the client's confirmation prompt, or by re-running with confirm=true where permitted). Each approval is single-use, so a transient API failure after approval requires a fresh preview and approval. Returns the new instance id.",
 		Annotations: annCreate,
 	}, d.createInstance)
 	mcp.AddTool(s, &mcp.Tool{
