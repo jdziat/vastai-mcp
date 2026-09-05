@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/jdziat/vastai-mcp/compare/v0.1.0...v0.2.0) (2026-09-05)
+
+
+### Features
+
+* **auth:** store the API key in the OS keyring ([e7473fc](https://github.com/jdziat/vastai-mcp/commit/e7473fcbaf07ec8ab07fd6661ac4df8987adcf35))
+
+
+### Documentation
+
+* **readme:** correct cosign identity (release job signs from refs/heads/main, not a tag ref) ([1702362](https://github.com/jdziat/vastai-mcp/commit/1702362b4ef58de87e0f1fe5106f1c7544dd9318))
+
 ## 0.1.0 (2026-09-05)
 
 
