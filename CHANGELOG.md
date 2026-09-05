@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.0](https://github.com/jdziat/vastai-mcp/compare/v0.3.0...v1.0.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* vast_create_ssh_key and vast_attach_ssh_key require confirmation; the -audit-log file is now raw JSONL without the AUDIT prefix; -max-dph now applies to vast_start_instance.
+
+### Features
+
+* 1.0 hardening from the final adversarial review ([3e56933](https://github.com/jdziat/vastai-mcp/commit/3e569330a69a99f62fd5eaa36650b41dd859bfb1))
+
+
+### Bug Fixes
+
+* **tools:** keep the storage-unknown guard on the bid path ([c038945](https://github.com/jdziat/vastai-mcp/commit/c038945879c9b832925db35801d893ad52770987))
+
 ## [0.3.0](https://github.com/jdziat/vastai-mcp/compare/v0.2.0...v0.3.0) (2026-09-05)
 
 
