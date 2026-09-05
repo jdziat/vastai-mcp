@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 (2026-09-05)
+
+
+### Features
+
+* **ci:** conventional commits and automated releases ([38f4d17](https://github.com/jdziat/vastai-mcp/commit/38f4d175c033060c91b5f683b8cd1cb665605c1e))
+
+## Changelog
+
 Entries below this line are maintained by release-please.
 
 ## Pre-release notes
