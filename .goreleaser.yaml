@@ -16,3 +16,17 @@ checksum:
   name_template: checksums.txt
 changelog:
   use: git
+signs:
+  # Keyless Sigstore signing via the workflow's GitHub OIDC identity.
+  # Signing checksums.txt covers every archive listed in it.
+  - cmd: cosign
+    certificate: '${artifact}.pem'
+    signature: '${artifact}.sig'
+    args:
+      - sign-blob
+      - --yes
+      - --oidc-provider=github-actions
+      - --output-certificate=${certificate}
+      - --output-signature=${signature}
+      - ${artifact}
+    artifacts: checksum

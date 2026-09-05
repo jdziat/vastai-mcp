@@ -9,8 +9,19 @@ guardrails.
 ## Install
 
 Release binaries with checksums are attached to each
-[GitHub release](https://github.com/jdziat/vastai-mcp/releases). Or build from
-source:
+[GitHub release](https://github.com/jdziat/vastai-mcp/releases). The
+`checksums.txt` file is signed keylessly with [Sigstore cosign](https://docs.sigstore.dev)
+by the release workflow's GitHub identity, so you can verify a download:
+
+```sh
+cosign verify-blob checksums.txt \
+  --certificate checksums.txt.pem --signature checksums.txt.sig \
+  --certificate-identity-regexp 'https://github.com/jdziat/vastai-mcp/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum -c checksums.txt --ignore-missing
+```
+
+Or build from source:
 
 ```sh
 go install github.com/jdziat/vastai-mcp/cmd/vastai-mcp@latest
