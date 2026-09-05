@@ -1,0 +1,10 @@
+{
+ "_meta": {
+  "endpoint": "/instances/1/?owner=me",
+  "method": "GET",
+  "recorded_at": "2026-09-05T15:14:43.137226+00:00",
+  "note": "nonexistent id -> {\"instances\": null}; existing id returns an object per official CLI",
+  "scrubbed": []
+ },
+ "instances": null
+}

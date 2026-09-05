@@ -1,0 +1,32 @@
+{
+ "_meta": {
+  "endpoint": "/ssh/",
+  "method": "GET",
+  "recorded_at": "2026-09-05T15:14:43.137226+00:00",
+  "note": "top-level JSON array",
+  "scrubbed": [
+   "public_key",
+   "user_id"
+  ]
+ },
+ "data": [
+  {
+   "id": 694971,
+   "user_id": 0,
+   "default": null,
+   "public_key": "ssh-ed25519 <scrubbed>",
+   "private_key": null,
+   "created_at": 1774048157.145925,
+   "deleted_at": null
+  },
+  {
+   "id": 574791,
+   "user_id": 0,
+   "default": null,
+   "public_key": "ssh-ed25519 <scrubbed>",
+   "private_key": null,
+   "created_at": 1768740814.7439232,
+   "deleted_at": null
+  }
+ ]
+}
