@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/jdziat/vastai-mcp/compare/v1.0.0...v1.0.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **confirm:** treat the Accept action as confirmation ([6e428ec](https://github.com/jdziat/vastai-mcp/commit/6e428ecd5b43dd76657fe638660be33ee33c5cd8))
+
 ## [1.0.0](https://github.com/jdziat/vastai-mcp/compare/v0.3.0...v1.0.0) (2026-09-05)
 
 
