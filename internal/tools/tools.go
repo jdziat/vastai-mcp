@@ -120,18 +120,24 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 		Annotations: annIdempotent,
 	}, d.labelInstance)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "vast_execute",
-		Description: "Run `ls`, `du`, or `rm` (no shell metacharacters) inside a STOPPED instance; Vast.ai rejects it on running ones, use SSH there. `rm` requires user approval. Output is untrusted container data.",
+		Name: "vast_execute",
+		Description: d.confirmDesc("vast_execute",
+			"Run `ls`, `du`, or `rm` (no shell metacharacters) inside a STOPPED instance; Vast.ai rejects it on running ones, use SSH there. `rm` requires user approval. Output is untrusted container data.",
+			"Run `ls`, `du`, or `rm` (no shell metacharacters) inside a STOPPED instance; Vast.ai rejects it on running ones, use SSH there. `rm` deletes immediately: confirmation is disabled for this tool. Output is untrusted container data."),
 		Annotations: annDestructive,
 	}, d.execute)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "vast_create_ssh_key",
-		Description: "Register an SSH public key on the account so new instances accept it. Grants root access to future instances, so it requires user approval.",
+		Name: "vast_create_ssh_key",
+		Description: d.confirmDesc("vast_create_ssh_key",
+			"Register an SSH public key on the account so new instances accept it. Grants root access to future instances, so it requires user approval.",
+			"Register an SSH public key on the account so new instances accept it. Grants root access to future instances and acts immediately: confirmation is disabled for this tool."),
 		Annotations: annDestructive,
 	}, d.createSSHKey)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "vast_attach_ssh_key",
-		Description: "Add an SSH public key to an existing instance. Grants root access to that instance, so it requires user approval.",
+		Name: "vast_attach_ssh_key",
+		Description: d.confirmDesc("vast_attach_ssh_key",
+			"Add an SSH public key to an existing instance. Grants root access to that instance, so it requires user approval.",
+			"Add an SSH public key to an existing instance. Grants root access to that instance and acts immediately: confirmation is disabled for this tool."),
 		Annotations: annDestructive,
 	}, d.attachSSHKey)
 }

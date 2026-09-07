@@ -857,3 +857,35 @@ func TestParseNoConfirm(t *testing.T) {
 		t.Fatalf("empty: %v %v", m, err)
 	}
 }
+
+func TestInstructionsFollowConfirmPolicy(t *testing.T) {
+	all := Config{Confirm: true}
+	if got := all.Instructions(); !strings.Contains(got, "require the user's confirmation") || strings.Contains(got, "act immediately") {
+		t.Fatalf("confirming server: %q", got)
+	}
+	part := Config{Confirm: true, NoConfirm: map[string]bool{"vast_destroy_instance": true}}
+	got := part.Instructions()
+	if !strings.Contains(got, "act immediately with no confirmation, so call them only when the user has asked for that action: vast_destroy_instance.") {
+		t.Fatalf("exempt list: %q", got)
+	}
+	if !strings.Contains(got, "vast_create_instance") || !strings.Contains(got, "require the user's confirmation") {
+		t.Fatalf("remaining prompts should still be listed: %q", got)
+	}
+	none := Config{Confirm: false}
+	if got := none.Instructions(); strings.Contains(got, "require the user's confirmation") {
+		t.Fatalf("confirm off: %q", got)
+	}
+	if got := (&Config{ReadOnly: true}).Instructions(); !strings.Contains(got, "Only read-only tools") {
+		t.Fatalf("read-only: %q", got)
+	}
+}
+
+func TestExemptToolDescriptionsSayImmediate(t *testing.T) {
+	d := &deps{cfg: Config{Confirm: true, NoConfirm: map[string]bool{"vast_execute": true}}}
+	if got := d.confirmDesc("vast_execute", "asks", "immediate"); got != "immediate" {
+		t.Fatalf("exempt tool got %q", got)
+	}
+	if got := d.confirmDesc("vast_create_ssh_key", "asks", "immediate"); got != "asks" {
+		t.Fatalf("still-prompting tool got %q", got)
+	}
+}
