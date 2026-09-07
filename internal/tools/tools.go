@@ -86,13 +86,17 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 	}
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "vast_create_instance",
-		Description: "Rent an offer and start a container on it. Spends money. Returns a cost preview and creates nothing until the user approves it (client confirmation prompt, or confirm=true where permitted); each approval is single-use. Returns the new instance id.",
+		Name: "vast_create_instance",
+		Description: d.confirmDesc("vast_create_instance",
+			"Rent an offer and start a container on it. Spends money. Returns a cost preview and creates nothing until the user approves it (client confirmation prompt, or confirm=true where permitted); each approval is single-use. Returns the new instance id.",
+			"Rent an offer and start a container on it. Spends money and acts immediately: confirmation is disabled for this tool. Returns the new instance id."),
 		Annotations: annCreate,
 	}, d.createInstance)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "vast_destroy_instance",
-		Description: "Destroy an instance and delete its disk. Irreversible. Returns a preview and destroys nothing until the user approves.",
+		Name: "vast_destroy_instance",
+		Description: d.confirmDesc("vast_destroy_instance",
+			"Destroy an instance and delete its disk. Irreversible. Returns a preview and destroys nothing until the user approves.",
+			"Destroy an instance and delete its disk. Irreversible and acts immediately: confirmation is disabled for this tool."),
 		Annotations: annDestructive,
 	}, d.destroyInstance)
 	mcp.AddTool(s, &mcp.Tool{
@@ -130,6 +134,15 @@ func Register(s *mcp.Server, c *vast.Client, cfg Config) {
 		Description: "Add an SSH public key to an existing instance. Grants root access to that instance, so it requires user approval.",
 		Annotations: annDestructive,
 	}, d.attachSSHKey)
+}
+
+// confirmDesc picks the tool description that matches the confirmation policy,
+// so the model is not told a call will pause when it will not.
+func (d *deps) confirmDesc(tool, asks, immediate string) string {
+	if d.cfg.Confirm && !d.cfg.NoConfirm[tool] {
+		return asks
+	}
+	return immediate
 }
 
 // ---- result helpers ------------------------------------------------------

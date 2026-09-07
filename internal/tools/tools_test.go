@@ -821,3 +821,39 @@ func TestAcceptWithoutFormContentConfirms(t *testing.T) {
 		t.Fatalf("explicit confirm=false must refuse: %q", out)
 	}
 }
+
+func TestNoConfirmExemptsDestroyOnly(t *testing.T) {
+	cfg := Config{Confirm: true, ConfirmArgAllowed: false, NoConfirm: map[string]bool{"vast_destroy_instance": true}}
+	e := newEnv(t, cfg, decline)
+	out, isErr := e.call(t, "vast_destroy_instance", map[string]any{"id": 777})
+	if isErr || strings.Contains(out, "not_destroyed") {
+		t.Fatalf("exempted destroy should run without confirmation: %q", out)
+	}
+	if !hasMutation(e.stub.mutations(), "DELETE ") {
+		t.Fatalf("expected DELETE, got %v", e.stub.mutations())
+	}
+	out, _ = e.call(t, "vast_create_instance", map[string]any{"offer_id": 42, "image": "x", "confirm": true})
+	if !strings.Contains(out, "not_created") {
+		t.Fatalf("create must still confirm: %q", out)
+	}
+}
+
+func TestParseNoConfirm(t *testing.T) {
+	got, err := ParseNoConfirm(" destroy_instance , vast_execute ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["vast_destroy_instance"] || !got["vast_execute"] || len(got) != 2 {
+		t.Fatalf("got %v", got)
+	}
+	all, err := ParseNoConfirm("all")
+	if err != nil || len(all) != len(ConfirmableTools()) {
+		t.Fatalf("all: %v %v", all, err)
+	}
+	if _, err := ParseNoConfirm("vast_stop_instance"); err == nil {
+		t.Fatal("expected error for a tool that never prompts")
+	}
+	if m, err := ParseNoConfirm(""); err != nil || len(m) != 0 {
+		t.Fatalf("empty: %v %v", m, err)
+	}
+}

@@ -32,10 +32,12 @@ const confirmKey = "confirm"
 // final regardless of any `confirm` argument. Otherwise the argument path is
 // allowed only when cfg.ConfirmArgAllowed (stdio / loopback).
 //
+// Tools listed in cfg.NoConfirm skip the whole flow.
+//
 // A non-nil result must be returned to the client as-is (it carries the
 // elicitation request). A nil result and nil error means proceed.
 func (d *deps) confirm(req *mcp.CallToolRequest, confirmArg bool, tool, action, preview string, price float64) (*mcp.CallToolResult, error) {
-	if !d.cfg.Confirm {
+	if !d.cfg.Confirm || d.cfg.NoConfirm[tool] {
 		return nil, nil
 	}
 	if clientCanElicit(req) {
