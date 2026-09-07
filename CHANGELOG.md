@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/jdziat/vastai-mcp/compare/v1.0.1...v1.1.0) (2026-09-07)
+
+
+### Features
+
+* **confirm:** add -no-confirm per-tool exemptions ([#12](https://github.com/jdziat/vastai-mcp/issues/12)) ([af434a2](https://github.com/jdziat/vastai-mcp/commit/af434a276134030aaa2ddff9f33bbcd856c69cf7))
+
+
+### Bug Fixes
+
+* close two open-nitpick full-review findings ([#15](https://github.com/jdziat/vastai-mcp/issues/15)) ([3242e89](https://github.com/jdziat/vastai-mcp/commit/3242e89997fafc0427f06fd81b0f49d3f9b3fe85))
+* **confirm:** describe exempted tools as acting immediately ([#14](https://github.com/jdziat/vastai-mcp/issues/14)) ([2d2269b](https://github.com/jdziat/vastai-mcp/commit/2d2269ba028ff8c0f4383de54d218c261b1d465f))
+
 ## [1.0.1](https://github.com/jdziat/vastai-mcp/compare/v1.0.0...v1.0.1) (2026-09-05)
 
 
