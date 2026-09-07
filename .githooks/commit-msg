@@ -4,8 +4,15 @@ msg=$(sed -n '1p' "$1")
 case "$msg" in
   Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
 esac
-if ! printf '%s' "$msg" | grep -Eq '^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([a-z0-9._/-]+\))?!?: [^ ].{0,90}$'; then
+if ! printf '%s' "$msg" | grep -Eq '^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([a-z0-9._/-]+\))?!?: [^ ]'; then
   echo "commit-msg: header must be Conventional Commits, e.g. 'feat(tools): add vast_foo' or 'fix: ...'" >&2
+  echo "  got: $msg" >&2
+  exit 1
+fi
+# header-max-length in .commitlintrc.yml counts the WHOLE header, so measuring
+# only the part after the type would let a long scope pass here and fail CI.
+if [ "${#msg}" -gt 100 ]; then
+  echo "commit-msg: header is ${#msg} characters; the limit is 100 (header-max-length in .commitlintrc.yml)" >&2
   echo "  got: $msg" >&2
   exit 1
 fi
