@@ -889,3 +889,20 @@ func TestExemptToolDescriptionsSayImmediate(t *testing.T) {
 		t.Fatalf("still-prompting tool got %q", got)
 	}
 }
+
+func TestWrapUntrustedCapsWhenBudgetIsTiny(t *testing.T) {
+	body := strings.Repeat("x", 4096)
+	for _, max := range []int{0, 1, 64, len(untrustedPreamble)} {
+		got := wrapUntrusted("src", body, max)
+		if strings.Contains(got, strings.Repeat("x", 512)) {
+			t.Fatalf("max=%d passed the payload through uncapped (%d bytes)", max, len(got))
+		}
+		if !strings.HasSuffix(got, "</untrusted>") {
+			t.Fatalf("max=%d lost the closing delimiter: %q", max, got)
+		}
+	}
+	big := wrapUntrusted("src", body, 96*1024)
+	if !strings.Contains(big, body) {
+		t.Fatal("a generous max must not truncate")
+	}
+}
