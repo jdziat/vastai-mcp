@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,9 @@ type Config struct {
 	ReadOnly bool
 	// Confirm requires human confirmation for create/destroy/rm.
 	Confirm bool
+	// NoConfirm names tools exempted from Confirm, e.g. vast_destroy_instance
+	// for unattended agents. Ignored when Confirm is false (nothing to exempt).
+	NoConfirm map[string]bool
 	// ConfirmArgAllowed permits the `confirm: true` argument as a fallback when
 	// the client cannot elicit. main sets this only for stdio or loopback binds.
 	ConfirmArgAllowed bool
@@ -170,4 +174,44 @@ func (a *auditor) log(tool string, args any, outcome string, extra map[string]an
 			}
 		}
 	}
+}
+
+// confirmableTools are the tools that ask for confirmation when Confirm is on,
+// and therefore the only names -no-confirm accepts.
+var confirmableTools = []string{
+	"vast_create_instance",
+	"vast_destroy_instance",
+	"vast_execute",
+	"vast_create_ssh_key",
+	"vast_attach_ssh_key",
+}
+
+// ConfirmableTools lists the tools that may be named in ParseNoConfirm.
+func ConfirmableTools() []string { return append([]string(nil), confirmableTools...) }
+
+// ParseNoConfirm turns a comma-separated tool list into a NoConfirm set,
+// rejecting names that never prompt so a typo cannot silently do nothing.
+// "all" exempts every confirmable tool.
+func ParseNoConfirm(s string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, f := range strings.Split(s, ",") {
+		name := strings.TrimSpace(f)
+		if name == "" {
+			continue
+		}
+		if name == "all" {
+			for _, t := range confirmableTools {
+				out[t] = true
+			}
+			continue
+		}
+		if !strings.HasPrefix(name, "vast_") {
+			name = "vast_" + name
+		}
+		if !slices.Contains(confirmableTools, name) {
+			return nil, fmt.Errorf("%q does not ask for confirmation; expected one of %s or all", name, strings.Join(confirmableTools, ", "))
+		}
+		out[name] = true
+	}
+	return out, nil
 }
